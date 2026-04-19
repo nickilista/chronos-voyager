@@ -18,12 +18,14 @@ export class Game {
   readonly renderer: WebGLRenderer;
   readonly scene = new Scene();
   readonly camera: PerspectiveCamera;
-  readonly ship = new Ship();
+  readonly ship: Ship;
   readonly skybox: Skybox;
 
   private currentEra: Era;
   private ambient: AmbientLight;
   private key: DirectionalLight;
+  private rim: DirectionalLight;
+  private fill: DirectionalLight;
   private lastTs = performance.now();
   private _smoothCamPos = new Vector3();
 
@@ -48,12 +50,25 @@ export class Game {
     this.skybox = new Skybox(this.currentEra);
     this.scene.add(this.skybox.mesh);
 
-    this.ambient = new AmbientLight(0xffffff, 0.4);
+    this.ship = new Ship(this.currentEra.palette.accent);
+
+    // Three-point lighting for premium ship stacco
+    this.ambient = new AmbientLight(0xffffff, 0.35);
     this.scene.add(this.ambient);
 
-    this.key = new DirectionalLight(this.currentEra.palette.accent, 1.1);
+    this.key = new DirectionalLight(this.currentEra.palette.accent, 1.2);
     this.key.position.set(5, 8, 3);
     this.scene.add(this.key);
+
+    // Rim light from behind-above creates the shiny edge on the hull
+    this.rim = new DirectionalLight(0x88bbff, 1.0);
+    this.rim.position.set(-3, 5, 10);
+    this.scene.add(this.rim);
+
+    // Fill to prevent belly going completely black
+    this.fill = new DirectionalLight(0x4455aa, 0.4);
+    this.fill.position.set(0, -4, 3);
+    this.scene.add(this.fill);
 
     this.scene.add(this.ship.group);
 
