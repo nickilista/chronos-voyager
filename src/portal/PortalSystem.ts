@@ -188,9 +188,13 @@ export class PortalSystem {
       const exit = buildPortalGroup({
         color: 0x00ff00,
         label: 'VIBE JAM PORTAL',
-        // Slightly off to the side of the starting corridor so the player
-        // notices it while flying through Egypt but doesn't collide on spawn.
-        position: new Vector3(48, 6, -120),
+        // Free space, clearly OUTSIDE the Egyptian corridor tube
+        // (CORRIDOR_RADIUS = 50, so x=130 is well clear). Positive z
+        // places it BEFORE the corridor entrance (corridor axis is -Z
+        // from origin), so the player sees it on their descent from the
+        // (0, 500, 200) spawn and can choose to fly toward it or ignore
+        // it — it never sits on their flight path into Egypt.
+        position: new Vector3(130, 60, 120),
       });
       this.exitPortal = exit.group;
       this.exitParticles = exit.particles;
