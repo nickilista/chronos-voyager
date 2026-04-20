@@ -316,7 +316,7 @@ export class PlayfairPuzzle extends Puzzle {
       background: 'rgba(10,18,16,0.94)', backdropFilter: 'blur(12px)',
       border: `1px solid ${C_MATRIX_GREEN}40`, borderTop: `3px solid ${C_MATRIX_GREEN}`,
       borderRadius: '10px', boxShadow: `0 18px 60px rgba(0,0,0,0.7)`, color: C_CREAM,
-      maxHeight: '96vh', overflowY: 'auto', maxWidth: '420px', width: '95%',
+      maxHeight: '96vh', overflowY: 'auto', maxWidth: 'min(420px, calc(100vw - 16px))', width: '95%', boxSizing: 'border-box',
     });
     root.appendChild(panel);
 

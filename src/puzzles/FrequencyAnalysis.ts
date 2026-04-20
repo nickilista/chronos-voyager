@@ -179,7 +179,7 @@ export class FrequencyAnalysisPuzzle extends Puzzle {
     Object.assign(panel.style, {
       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px',
       pointerEvents: 'auto', padding: '18px 22px',
-      maxWidth: '640px', width: '92%', maxHeight: '96vh', overflowY: 'auto',
+      maxWidth: 'min(640px, calc(100vw - 16px))', width: '92%', maxHeight: '96vh', overflowY: 'auto', boxSizing: 'border-box',
       background: 'rgba(22,33,62,0.92)', backdropFilter: 'blur(12px)',
       border: '1px solid rgba(196,164,74,0.25)', borderTop: `3px solid ${C_GOLD}`,
       borderRadius: '12px', boxShadow: '0 18px 60px rgba(0,0,0,0.65)', color: C_CREAM,

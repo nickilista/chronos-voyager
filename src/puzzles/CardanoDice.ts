@@ -346,7 +346,7 @@ export class CardanoDicePuzzle extends Puzzle {
       background: 'rgba(26,15,10,0.92)', backdropFilter: 'blur(12px)',
       border: '1px solid rgba(197,151,44,0.25)', borderTop: `3px solid ${C_FLO_GOLD}`,
       borderRadius: '10px', boxShadow: '0 18px 60px rgba(0,0,0,0.65)', color: C_WARM_IVORY,
-      maxHeight: '96vh', overflowY: 'auto',
+      maxHeight: '96vh', overflowY: 'auto', maxWidth: 'calc(100vw - 16px)', boxSizing: 'border-box',
     });
     root.appendChild(panel);
 

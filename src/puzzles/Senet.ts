@@ -11,6 +11,7 @@ import {
   Vector2,
   Vector3,
 } from 'three';
+import { IS_MOBILE } from '../core/Platform.ts';
 import { Puzzle } from './PuzzleBase.ts';
 
 /**
@@ -641,7 +642,7 @@ export class SenetPuzzle extends Puzzle {
       'position:absolute;left:50%;top:24px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:10px;pointer-events:auto;';
     const status = document.createElement('div');
     status.style.cssText =
-      'padding:10px 22px;border:1px solid rgba(212,168,67,0.35);border-bottom:3px solid #d4a843;background:rgba(10,6,2,0.8);backdrop-filter:blur(10px);border-radius:6px;color:#fff;letter-spacing:0.05em;font-size:clamp(12px,3vw,14px);text-align:center;min-width:min(360px,90vw);max-width:calc(100vw - 32px);';
+      'padding:10px 22px;border:1px solid rgba(212,168,67,0.35);border-bottom:3px solid #d4a843;background:rgba(10,6,2,0.8);backdrop-filter:blur(10px);border-radius:6px;color:#fff;letter-spacing:0.05em;font-size:clamp(12px,3vw,14px);text-align:center;min-width:min(300px,88vw);max-width:calc(100vw - 32px);box-sizing:border-box;';
     this.statusEl = status;
     const btn = document.createElement('button');
     btn.textContent = 'THROW STICKS';
@@ -655,10 +656,10 @@ export class SenetPuzzle extends Puzzle {
     const rulesBtn = document.createElement('button');
     rulesBtn.textContent = 'ⓘ RULES';
     rulesBtn.style.cssText =
-      'position:absolute;top:24px;left:24px;padding:8px 14px;border:1px solid rgba(212,168,67,0.4);background:rgba(10,6,2,0.7);color:#d4a843;letter-spacing:0.12em;font-weight:600;cursor:pointer;border-radius:4px;font-size:12px;pointer-events:auto;font-family:inherit;';
+      'position:absolute;top:8px;left:8px;padding:6px 10px;border:1px solid rgba(212,168,67,0.4);background:rgba(10,6,2,0.7);color:#d4a843;letter-spacing:0.12em;font-weight:600;cursor:pointer;border-radius:4px;font-size:11px;pointer-events:auto;font-family:inherit;min-height:44px;min-width:44px;';
     const rules = document.createElement('div');
     rules.style.cssText =
-      'position:absolute;top:70px;left:24px;max-width:min(360px,calc(100vw - 48px));max-height:70vh;overflow-y:auto;padding:clamp(10px,2vw,16px) clamp(12px,3vw,18px);border:1px solid rgba(212,168,67,0.35);background:rgba(14,8,3,0.92);backdrop-filter:blur(12px);color:#e6dcc2;border-radius:6px;font-size:clamp(11px,2.5vw,12.5px);line-height:1.55;display:none;pointer-events:auto;';
+      'position:absolute;top:60px;left:8px;max-width:min(360px,calc(100vw - 24px));max-height:70vh;overflow-y:auto;padding:clamp(10px,2vw,16px) clamp(12px,3vw,18px);border:1px solid rgba(212,168,67,0.35);background:rgba(14,8,3,0.92);backdrop-filter:blur(12px);color:#e6dcc2;border-radius:6px;font-size:clamp(11px,2.5vw,12.5px);line-height:1.55;display:none;pointer-events:auto;';
     rules.innerHTML = `
       <div style="color:#d4a843;letter-spacing:0.18em;font-weight:700;font-size:12px;margin-bottom:8px">SENET · THE GAME OF PASSING</div>
       <p>Senet (𓊃𓈖𓏏 — "passing") is one of humanity's oldest board games, carved into mastabas as early as 3100 BCE and buried alongside Tutankhamun. Egyptians believed the board mirrored the journey of the soul through the Duat to reach the afterlife.</p>
@@ -742,7 +743,7 @@ export class SenetPuzzle extends Puzzle {
     const hold = opts.hold ?? BANNER_TIME;
     this.bannerTimer = hold;
     this.bannerEl.innerHTML = `
-      <div style="position:relative;min-width:min(360px,90vw);max-width:min(520px,calc(100vw - 32px));padding:clamp(14px,3vw,22px) clamp(18px,4vw,34px);background:linear-gradient(180deg,${opts.bg},#0b0603);border:1px solid ${opts.color}99;border-radius:8px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,0.6),0 0 0 1px ${opts.color}33 inset;">
+      <div style="position:relative;min-width:min(300px,88vw);max-width:min(520px,calc(100vw - 32px));padding:clamp(14px,3vw,22px) clamp(18px,4vw,34px);background:linear-gradient(180deg,${opts.bg},#0b0603);border:1px solid ${opts.color}99;border-radius:8px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,0.6),0 0 0 1px ${opts.color}33 inset;">
         <div style="position:absolute;top:6px;left:6px;width:10px;height:10px;border-left:2px solid ${opts.color};border-top:2px solid ${opts.color};opacity:0.65"></div>
         <div style="position:absolute;top:6px;right:6px;width:10px;height:10px;border-right:2px solid ${opts.color};border-top:2px solid ${opts.color};opacity:0.65"></div>
         <div style="position:absolute;bottom:6px;left:6px;width:10px;height:10px;border-left:2px solid ${opts.color};border-bottom:2px solid ${opts.color};opacity:0.65"></div>
@@ -1335,7 +1336,9 @@ export class SenetPuzzle extends Puzzle {
   /* --------------------------------- Frame --------------------------------- */
 
   update(dt: number, camera: PerspectiveCamera): void {
-    camera.position.set(0, 13.5, BOARD_D / 2 + 6.5);
+    const camY = IS_MOBILE ? 16 : 13.5;
+    const camZ = BOARD_D / 2 + (IS_MOBILE ? 8 : 6.5);
+    camera.position.set(0, camY, camZ);
     camera.lookAt(0, 0, 0.2);
 
     this.updateBanner(dt);

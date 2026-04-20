@@ -330,11 +330,11 @@ export class KolamPuzzle extends Puzzle {
     const panel = document.createElement('div');
     Object.assign(panel.style, {
       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px',
-      pointerEvents: 'auto', padding: '16px 20px',
+      pointerEvents: 'auto', padding: 'clamp(10px,2vw,16px) clamp(12px,3vw,20px)',
       background: 'rgba(26,15,8,0.92)', backdropFilter: 'blur(12px)',
       border: '1px solid rgba(224,112,32,0.25)', borderTop: `3px solid ${C_ACTIVE}`,
       borderRadius: '10px', boxShadow: '0 18px 60px rgba(0,0,0,0.65)', color: C_CREAM,
-      maxHeight: '96vh', overflowY: 'auto',
+      maxHeight: '96vh', overflowY: 'auto', maxWidth: 'calc(100vw - 16px)', boxSizing: 'border-box',
     });
     root.appendChild(panel);
 
@@ -372,7 +372,7 @@ export class KolamPuzzle extends Puzzle {
     const cvs = document.createElement('canvas');
     cvs.width = CANVAS_SIZE * 2;
     cvs.height = CANVAS_SIZE * 2;
-    Object.assign(cvs.style, { width: CANVAS_SIZE + 'px', height: CANVAS_SIZE + 'px', display: 'block', cursor: 'pointer' });
+    Object.assign(cvs.style, { width: CANVAS_SIZE + 'px', height: CANVAS_SIZE + 'px', maxWidth: '100%', maxHeight: '100%', display: 'block', cursor: 'pointer' });
     this.ctx2d = cvs.getContext('2d')!;
     canvasWrap.appendChild(cvs);
 

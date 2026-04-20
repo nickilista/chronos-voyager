@@ -255,7 +255,7 @@ export class SorobanPuzzle extends Puzzle {
       background: 'rgba(14,8,24,0.92)', backdropFilter: 'blur(12px)',
       border: `1px solid ${C_GOLD_LEAF}40`, borderTop: `3px solid ${C_GOLD_LEAF}`,
       borderRadius: '10px', boxShadow: '0 18px 60px rgba(0,0,0,0.65)', color: C_PARCHMENT,
-      maxHeight: '96vh', overflowY: 'auto', minWidth: 'min(380px, 95vw)',
+      maxHeight: '96vh', overflowY: 'auto', minWidth: 'min(380px, calc(100vw - 24px))', maxWidth: 'calc(100vw - 16px)', boxSizing: 'border-box',
     });
     root.appendChild(panel);
 

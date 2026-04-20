@@ -330,7 +330,7 @@ export class FourColorPuzzle extends Puzzle {
       background: 'rgba(15,10,20,0.92)', backdropFilter: 'blur(12px)',
       border: `1px solid ${C_COPPER}40`, borderTop: `3px solid ${C_PURPLE}`,
       borderRadius: '10px', boxShadow: '0 18px 60px rgba(0,0,0,0.65)', color: C_CREAM,
-      maxHeight: '96vh', overflowY: 'auto',
+      maxHeight: '96vh', overflowY: 'auto', maxWidth: 'calc(100vw - 16px)', boxSizing: 'border-box',
     });
     root.appendChild(panel);
 

@@ -279,7 +279,7 @@ export class BooleanGatesPuzzle extends Puzzle {
       background: 'rgba(15,10,20,0.92)', backdropFilter: 'blur(12px)',
       border: '1px solid rgba(155,89,182,0.25)', borderTop: `3px solid ${C_PURPLE}`,
       borderRadius: '10px', boxShadow: '0 18px 60px rgba(0,0,0,0.65)', color: C_CREAM,
-      maxHeight: '96vh', overflowY: 'auto', maxWidth: '440px', width: '95%',
+      maxHeight: '96vh', overflowY: 'auto', maxWidth: 'min(440px, calc(100vw - 16px))', width: '95%', boxSizing: 'border-box',
     });
     root.appendChild(panel);
 

@@ -262,7 +262,7 @@ export class CryptarithmeticPuzzle extends Puzzle {
       borderRadius: '14px',
       boxShadow: `0 18px 60px rgba(59,36,20,0.35)`,
       color: C_INK_BROWN,
-      maxHeight: '96vh', overflowY: 'auto',
+      maxHeight: '96vh', overflowY: 'auto', maxWidth: 'calc(100vw - 16px)', boxSizing: 'border-box',
     });
     root.appendChild(panel);
 
