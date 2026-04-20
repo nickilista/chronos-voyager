@@ -742,7 +742,7 @@ export class Game {
       return stage === 0 ? this.buildMoksha() : this.buildKolam();
     }
     if (eraId === 'renaissance') {
-      return stage === 0 ? this.buildCryptarithmetic() : this.buildCardano();
+      return stage === 0 ? this.buildCardano() : this.buildCryptarithmetic();
     }
     if (eraId === 'edo') {
       return stage === 0 ? this.buildSoroban() : this.buildSugoroku();
@@ -959,15 +959,20 @@ export class Game {
   private showEraComplete(flow: Flow): void {
     const el = document.createElement('div');
     el.style.cssText =
-      'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse at center,rgba(40,20,4,0.65),rgba(0,0,0,0.9));z-index:30;pointer-events:none;font-family:system-ui,sans-serif;';
+      'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse at center,rgba(40,20,4,0.65),rgba(0,0,0,0.9));z-index:30;pointer-events:auto;font-family:system-ui,sans-serif;cursor:default;';
     el.innerHTML = `
       <div style="text-align:center;padding:40px 60px;border:1px solid rgba(255,210,127,0.3);background:rgba(10,6,2,0.8);backdrop-filter:blur(10px);border-radius:8px;">
         <div style="color:var(--era-accent);font-size:12px;letter-spacing:0.25em;opacity:0.7">ERA COMPLETE</div>
-        <div style="color:#fff;font-size:28px;font-weight:600;margin-top:12px;letter-spacing:0.04em">${flow.era.name} preserved</div>
+        <div style="color:#fff;font-size:28px;font-weight:600;margin-top:12px;letter-spacing:0.04em">${flow.era.name} conquered</div>
         <div style="color:rgba(255,255,255,0.55);font-size:13px;margin-top:10px">mathematics remembered</div>
+        <button id="era-complete-btn" style="margin-top:24px;padding:12px 28px;font-family:inherit;font-size:13px;font-weight:600;letter-spacing:0.14em;color:#ffe0a0;background:rgba(255,210,127,0.12);border:1px solid rgba(255,210,127,0.4);border-radius:6px;cursor:pointer;transition:background 0.15s,border-color 0.15s;">Continue exploring history</button>
       </div>
     `;
     document.body.appendChild(el);
+    const btn = el.querySelector('#era-complete-btn') as HTMLButtonElement;
+    btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(255,210,127,0.25)'; btn.style.borderColor = 'rgba(255,210,127,0.7)'; });
+    btn.addEventListener('mouseleave', () => { btn.style.background = 'rgba(255,210,127,0.12)'; btn.style.borderColor = 'rgba(255,210,127,0.4)'; });
+    btn.addEventListener('click', () => { el.remove(); });
   }
 
   /**

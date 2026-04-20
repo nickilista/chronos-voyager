@@ -91,6 +91,17 @@ export class AudioManager {
    *  music in and the Game can pause everything at death if needed. */
   private musicMuteScale = 1;
   private unlocked = false;
+  private _muted = false;
+
+  /** Toggle global mute (music + SFX). Returns the new muted state. */
+  toggleMute(): boolean {
+    this._muted = !this._muted;
+    if (this.musicBus) this.musicBus.gain.value = this._muted ? 0 : MUSIC_VOLUME * this.musicMuteScale;
+    if (this.sfxBus) this.sfxBus.gain.value = this._muted ? 0 : SFX_VOLUME;
+    return this._muted;
+  }
+
+  get isMuted(): boolean { return this._muted; }
 
   /**
    * Lazily construct the audio graph. Safe to call multiple times. The

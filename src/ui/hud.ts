@@ -9,6 +9,7 @@
  */
 
 import { SaveManager } from '../core/SaveManager.ts';
+import { getAudio } from '../core/Audio.ts';
 
 export class Hud {
   readonly root: HTMLDivElement;
@@ -154,6 +155,17 @@ export class Hud {
 
     this.sessionMenuEl.append(this.changeShipBtn, this.resetBtn);
 
+    // Sound toggle (top-right, below readout)
+    const soundBtn = document.createElement('button');
+    soundBtn.className = 'hud-sound-btn';
+    soundBtn.type = 'button';
+    soundBtn.textContent = '\u{1F50A}'; // speaker icon
+    soundBtn.title = 'Toggle sound';
+    soundBtn.addEventListener('click', () => {
+      const muted = getAudio().toggleMute();
+      soundBtn.textContent = muted ? '\u{1F507}' : '\u{1F50A}';
+    });
+
     this.root.append(
       badge,
       readout,
@@ -163,6 +175,7 @@ export class Hud {
       this.controlsEl,
       this.exitBtn,
       this.sessionMenuEl,
+      soundBtn,
     );
     parent.appendChild(this.root);
   }
@@ -606,6 +619,35 @@ export class Hud {
         color: #ffa0a8;
         background: rgba(40, 10, 16, 0.85);
         border-color: rgba(255, 100, 120, 0.7);
+      }
+
+      /* ============ Sound toggle (top-right corner) ============ */
+      .hud-sound-btn {
+        position: absolute;
+        top: 68px;
+        right: 22px;
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        font-size: 16px;
+        line-height: 1;
+        color: rgba(230, 250, 255, 0.7);
+        background: rgba(6, 10, 22, 0.6);
+        border: 1px solid rgba(95, 180, 255, 0.3);
+        border-radius: 50%;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        cursor: pointer;
+        pointer-events: auto;
+        transition: background 0.15s ease-out, border-color 0.15s ease-out;
+      }
+      .hud-sound-btn:hover {
+        color: #e6faff;
+        background: rgba(20, 40, 72, 0.85);
+        border-color: rgba(95, 200, 255, 0.7);
       }
     `;
     document.head.appendChild(s);
