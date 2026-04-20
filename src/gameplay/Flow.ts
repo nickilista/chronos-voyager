@@ -4,7 +4,6 @@ import type { Era } from '../eras/eras.ts';
 import { CorridorAura } from '../render/CorridorAura.ts';
 import { FloorGlyphs } from '../render/FloorGlyphs.ts';
 import { Collectibles } from './Collectibles.ts';
-import { Decorations } from './Decorations.ts';
 import { obstacleFactoriesFor } from './obstacles/monument.ts';
 import type { Obstacle } from './obstacles/types.ts';
 import { CORRIDOR_RADIUS, Track } from './Track.ts';
@@ -13,8 +12,8 @@ import { CORRIDOR_RADIUS, Track } from './Track.ts';
  * One era's flow corridor — a cylindrical bubble in 3D space at `origin`,
  * oriented so local -Z aligns with `axis` (the direction of travel).
  *
- * All gameplay subsystems (obstacles, collectibles, decorations, aura,
- * flow haze) are children of `this.group`, which is positioned at `origin`
+ * All gameplay subsystems (obstacles, collectibles, aura, flow haze)
+ * are children of `this.group`, which is positioned at `origin`
  * and rotated by `quaternion`. That means the subsystems keep operating in
  * their own local frame (local -Z is "forward"), while the flow as a whole
  * can sit anywhere in 3D space at any tilt.
@@ -39,7 +38,6 @@ export class Flow {
   readonly inverseQuaternion: Quaternion;
 
   readonly track: Track;
-  readonly decorations: Decorations;
   readonly collectibles: Collectibles;
   readonly corridorAura: CorridorAura;
   readonly floorGlyphs: FloorGlyphs;
@@ -69,7 +67,6 @@ export class Flow {
     this.group.quaternion.copy(this.quaternion);
 
     this.track = new Track();
-    this.decorations = new Decorations(era.id);
     this.collectibles = new Collectibles(
       era.id,
       {
@@ -94,13 +91,11 @@ export class Flow {
 
   init(): void {
     this.track.init();
-    this.decorations.init();
     this.collectibles.init();
     this.corridorAura.init();
     this.floorGlyphs.init();
     this.group.add(
       this.track.group,
-      this.decorations.group,
       this.collectibles.group,
       this.corridorAura.group,
       this.floorGlyphs.group,
@@ -146,14 +141,13 @@ export class Flow {
   ): void {
     this.worldToLocalPoint(shipWorld, this._localShip);
     this.worldToLocalDir(shipVelWorld, this._localVel);
-    // All subsystems (Track, Decorations, Collectibles, FloorGlyphs) use
-    // modular-loop placement: each object owns a canonical (x, y, z) inside
-    // a closed axial loop and is rendered every frame at the loop image
-    // nearest the ship. That means there's nothing to "seed around the
-    // entry" — the loop always brackets the ship regardless of entry axial,
+    // All subsystems (Track, Collectibles, FloorGlyphs) use modular-loop
+    // placement: each object owns a canonical (x, y, z) inside a closed
+    // axial loop and is rendered every frame at the loop image nearest
+    // the ship. That means there's nothing to "seed around the entry" —
+    // the loop always brackets the ship regardless of entry axial,
     // flight direction, or whether the ship just crossed the corridor wall.
     this.track.update(this._localShip.z, dt);
-    this.decorations.update(this._localShip.z);
     this.floorGlyphs.update(this._localShip.z);
     this.collectibles.update(dt, this._localShip, this._localShip);
     this.corridorAura.update(dt);
