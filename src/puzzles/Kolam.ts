@@ -199,22 +199,51 @@ function pattern4x6(): Segment[] {
 }
 
 function pattern6x6(): Segment[] {
-  const segs: Segment[] = [];
-  const cols = 6;
-  const rows = 6;
-  for (let c = 0; c < cols; c++) {
-    const bowRight = (c % 2 === 0) ? -0.28 : 0.28;
-    for (let r = 0; r < rows - 1; r++) {
-      segs.push(makeSegment(r * cols + c, (r + 1) * cols + c, bowRight));
-    }
-  }
-  segs.push(makeSegment(30, 31, -0.25));
-  segs.push(makeSegment(32, 33, -0.25));
-  segs.push(makeSegment(34, 35, -0.25));
-  segs.push(makeSegment(1, 2, 0.25));
-  segs.push(makeSegment(3, 4, 0.25));
-  segs.push(makeSegment(0, 5, -0.55));
-  return segs;
+  // Grid: dots numbered 0..35, row-major (6 cols).
+  //  0  1  2  3  4  5
+  //  6  7  8  9 10 11
+  // 12 13 14 15 16 17
+  // 18 19 20 21 22 23
+  // 24 25 26 27 28 29
+  // 30 31 32 33 34 35
+  //
+  // Interlocking loops with many branching nodes so the player must choose paths.
+  return [
+    // Outer border (top)
+    makeSegment(0, 1, 0.22), makeSegment(1, 2, 0.22),
+    makeSegment(2, 3, -0.22), makeSegment(3, 4, -0.22),
+    makeSegment(4, 5, 0.22),
+    // Right edge
+    makeSegment(5, 11, 0.25), makeSegment(11, 17, -0.25),
+    makeSegment(17, 23, 0.25), makeSegment(23, 29, -0.25),
+    makeSegment(29, 35, 0.25),
+    // Bottom border
+    makeSegment(35, 34, 0.22), makeSegment(34, 33, 0.22),
+    makeSegment(33, 32, -0.22), makeSegment(32, 31, -0.22),
+    makeSegment(31, 30, 0.22),
+    // Left edge
+    makeSegment(30, 24, 0.25), makeSegment(24, 18, -0.25),
+    makeSegment(18, 12, 0.25), makeSegment(12, 6, -0.25),
+    makeSegment(6, 0, 0.25),
+    // Inner cross — horizontal
+    makeSegment(7, 8, 0.30), makeSegment(8, 9, -0.30),
+    makeSegment(9, 10, 0.30),
+    makeSegment(25, 26, -0.30), makeSegment(26, 27, 0.30),
+    makeSegment(27, 28, -0.30),
+    // Inner cross — vertical
+    makeSegment(1, 7, -0.30), makeSegment(7, 13, 0.30),
+    makeSegment(13, 19, -0.30), makeSegment(19, 25, 0.30),
+    makeSegment(4, 10, 0.30), makeSegment(10, 16, -0.30),
+    makeSegment(16, 22, 0.30), makeSegment(22, 28, -0.30),
+    // Central diamond
+    makeSegment(14, 15, 0.35), makeSegment(15, 21, -0.35),
+    makeSegment(21, 20, 0.35), makeSegment(20, 14, -0.35),
+    // Bridges (create branching choices)
+    makeSegment(8, 14, 0.28), makeSegment(9, 15, -0.28),
+    makeSegment(20, 26, 0.28), makeSegment(21, 27, -0.28),
+    makeSegment(13, 14, 0.22), makeSegment(15, 16, 0.22),
+    makeSegment(19, 20, -0.22), makeSegment(21, 22, -0.22),
+  ];
 }
 
 function borderPattern(rows: number, cols: number): Segment[] {

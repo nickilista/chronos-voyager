@@ -485,18 +485,21 @@ export class Game {
       projectiles.init(this.scene);
       this.projectiles = projectiles;
 
-      // Enemies — spawn from classes the player hasn't unlocked yet.
-      // Defeat one → 5 parts of that class drop into the save at once.
-      // The list is refreshed whenever a class is (un)locked so a
-      // newly-unlocked ship stops appearing as an enemy.
-      const enemies = new Enemies({
-        onHitShip: (damage) => this.onMeteoriteHit(damage),
-        onDefeated: (position, cls) => this.onEnemyDefeated(position, cls),
-        onReward: (position, cls, parts) =>
-          this.onEnemyReward(position, cls, parts),
-      });
-      await enemies.init(this.scene, this.currentLockedClasses());
-      this.enemies = enemies;
+      // Enemies DISABLED per user request. The module stays wired up
+      // and fully reachable; re-enabling is a one-block restore:
+      //
+      //   const enemies = new Enemies({
+      //     onHitShip: (damage) => this.onMeteoriteHit(damage),
+      //     onDefeated: (position, cls) => this.onEnemyDefeated(position, cls),
+      //     onReward: (position, cls, parts) =>
+      //       this.onEnemyReward(position, cls, parts),
+      //   });
+      //   await enemies.init(this.scene, this.currentLockedClasses());
+      //   this.enemies = enemies;
+      //
+      // The Projectiles / AimAssist paths both accept `enemies` as
+      // optional, so `this.enemies === null` is a clean no-op — no
+      // dead-code traversal, no hull GLBs fetched from the network.
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[Game] combat init failed', err);
@@ -893,7 +896,7 @@ export class Game {
     this.saveProgress();
 
     if (flow.puzzleStage >= 2) {
-      this.showEraComplete(flow);
+      this.showEraComplete(flow, () => this.returnToOpenSpace(flow));
       this.puzzleFlow = null;
       return;
     }
@@ -957,7 +960,7 @@ export class Game {
     this.camera.lookAt(this.ship.group.position);
   }
 
-  private showEraComplete(flow: Flow): void {
+  private showEraComplete(flow: Flow, onContinue: () => void): void {
     const el = document.createElement('div');
     el.style.cssText =
       'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse at center,rgba(40,20,4,0.65),rgba(0,0,0,0.9));z-index:30;pointer-events:auto;font-family:system-ui,sans-serif;cursor:default;';
@@ -973,7 +976,26 @@ export class Game {
     const btn = el.querySelector('#era-complete-btn') as HTMLButtonElement;
     btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(255,210,127,0.25)'; btn.style.borderColor = 'rgba(255,210,127,0.7)'; });
     btn.addEventListener('mouseleave', () => { btn.style.background = 'rgba(255,210,127,0.12)'; btn.style.borderColor = 'rgba(255,210,127,0.4)'; });
-    btn.addEventListener('click', () => { el.remove(); });
+    btn.addEventListener('click', () => { el.remove(); onContinue(); });
+  }
+
+  private returnToOpenSpace(flow: Flow): void {
+    this.ship.group.visible = true;
+    this.flowManager.setAllVisible(true);
+    this.skybox.mesh.visible = true;
+    this.celestial.group.visible = true;
+    flow.resetCollectibles();
+    this.hp = this.maxHp;
+    this.shield = this.maxShield;
+    this.shieldRechargeTimer = 0;
+    this.hud.updateHpShield(this.hp, this.maxHp, this.shield, this.maxShield);
+    this.hud.updateOrbCount(0, ORB_TARGET);
+    this.hud.hideWin();
+    this.won = false;
+    this.ship.spawn(new Vector3(0, 500, 200), new Vector3(0, 0, 0));
+    this._smoothCamPos.copy(this.ship.group.position).add(CAMERA_OFFSET);
+    this.camera.position.copy(this._smoothCamPos);
+    this.camera.lookAt(this.ship.group.position);
   }
 
   /**
