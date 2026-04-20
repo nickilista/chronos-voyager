@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "_comment": "Runtime tuning for the free-space meteorite field. Edited by hand; loaded by src/gameplay/Meteorites.ts at boot.",
+  "meteorites": {
+    "rocky":   { "hp": 30, "speedRange": [20, 40], "scaleRange": [0.5, 1.5], "dropChance": 0.30, "touchDamage": 8,  "color": "#666055" },
+    "jagged":  { "hp": 50, "speedRange": [15, 30], "scaleRange": [1.0, 2.5], "dropChance": 0.50, "touchDamage": 12, "color": "#7a6e5f" },
+    "magma":   { "hp": 40, "speedRange": [25, 50], "scaleRange": [0.8, 1.8], "dropChance": 0.60, "touchDamage": 22, "color": "#cc4400" },
+    "crystal": { "hp": 25, "speedRange": [10, 25], "scaleRange": [0.6, 1.2], "dropChance": 0.80, "touchDamage": 6,  "color": "#9933ff", "rare": true },
+    "iron":    { "hp": 80, "speedRange": [10, 20], "scaleRange": [0.4, 1.0], "dropChance": 0.40, "touchDamage": 18, "color": "#444455" }
+  },
+  "spawnRules": {
+    "maxActive": 40,
+    "spawnIntervalSeconds": [2.0, 5.0],
+    "clusterChance": 0.2,
+    "clusterSize": [3, 6],
+    "spawnDistance": 220,
+    "despawnDistance": 320,
+    "freeSpaceOnly": true,
+    "_comment": "spawnDistance: units in front of the ship when a meteorite is spawned. despawnDistance: if the ship outruns the meteorite by this much, recycle it. freeSpaceOnly: don't spawn inside a flow corridor."
+  },
+  "weightings": {
+    "_comment": "Probability that a fresh spawn is of each type. Normalized at runtime.",
+    "rocky":   0.45,
+    "jagged":  0.20,
+    "magma":   0.15,
+    "crystal": 0.05,
+    "iron":    0.15
+  }
+}

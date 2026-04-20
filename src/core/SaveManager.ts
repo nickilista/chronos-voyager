@@ -1,9 +1,11 @@
 /**
  * LocalStorage persistence for Chronos Voyager.
  *
- * Stores the player's ship loadout, per-era puzzle progress, and live
- * HP/shield/boost under a single `chronos-save` key. The save is versioned
- * so future schema changes can migrate gracefully.
+ * Stores the player's ship loadout, per-era puzzle progress, live
+ * HP/shield/boost, and the new **ship-parts inventory + unlocked-ships
+ * roster** that powers the "shoot meteorites to unlock more ships"
+ * progression. Keyed under `chronos-save`; save is versioned and
+ * migrates gracefully across schema changes.
  */
 
 import type { ShipConfig, ShipClass } from '../shipbuilder/shipTypes.ts';
@@ -12,21 +14,43 @@ import type { ShipDerivedStats } from '../shipbuilder/shipTypes.ts';
 import type { EraId } from '../eras/eras.ts';
 
 const STORAGE_KEY = 'chronos-save';
-const CURRENT_VERSION = 1;
+const CURRENT_VERSION = 2;
 
 const ERA_IDS: readonly EraId[] = [
   'egypt', 'greece', 'china', 'islamic', 'india',
   'renaissance', 'edo', 'enlightenment', 'revolution', 'codebreakers',
 ];
 
+/**
+ * Number of "ship-part" drops a player has to collect for a given
+ * locked ship class before that ship becomes selectable in the Hangar.
+ * Three feels right — enough that it's not trivial, low enough that
+ * playing through the first couple of eras tends to unlock 2-3 ships
+ * at the natural drop rate from meteorite kills.
+ */
+export const SHIP_PART_UNLOCK_THRESHOLD = 3;
+
+/**
+ * Ships a fresh-start player has access to. Everything else starts
+ * locked and must be unlocked via meteorite drops. Falcon is a
+ * deliberate "friendly baseline" — balanced stats, no specials, so a
+ * new pilot isn't overwhelmed and the other 9 archetypes can feel
+ * distinct when they unlock later.
+ */
+export const DEFAULT_UNLOCKED: readonly ShipClass[] = ['falcon'];
+
 export interface SaveData {
-  version: 1;
+  version: 2;
   shipConfig: ShipConfig;
   shipStats: ShipDerivedStats;
   puzzleStages: Record<EraId, 0 | 1 | 2>;
   hp: number;
   shield: number;
   boostEnergy: number;
+  /** Classes the player has unlocked. Always contains at least Falcon. */
+  unlockedShips: ShipClass[];
+  /** Progress toward unlocking each locked class (count of collected parts). */
+  shipParts: Partial<Record<ShipClass, number>>;
 }
 
 function isValidShipClass(v: unknown): v is ShipClass {
@@ -55,13 +79,9 @@ function validate(data: unknown): data is SaveData {
     if (!isValidShipClass(cfg[slot])) return false;
   }
 
-  // shipStats: just check it's an object with maxHp (deep validation not
-  // worth the code — the game overwrites derived stats on load anyway if
-  // the formula changes).
   if (d.shipStats == null || typeof d.shipStats !== 'object') return false;
   if (typeof (d.shipStats as Record<string, unknown>).maxHp !== 'number') return false;
 
-  // puzzleStages: each era must have 0, 1, or 2.
   if (d.puzzleStages == null || typeof d.puzzleStages !== 'object') return false;
   const ps = d.puzzleStages as Record<string, unknown>;
   for (const era of ERA_IDS) {
@@ -72,7 +92,40 @@ function validate(data: unknown): data is SaveData {
   if (typeof d.shield !== 'number') return false;
   if (typeof d.boostEnergy !== 'number') return false;
 
+  if (!Array.isArray(d.unlockedShips)) return false;
+  if (!(d.unlockedShips as unknown[]).every(isValidShipClass)) return false;
+
+  if (d.shipParts == null || typeof d.shipParts !== 'object') return false;
+
   return true;
+}
+
+/**
+ * Attempt to migrate an older schema up to CURRENT_VERSION. Returns
+ * null if the data is too broken to salvage (caller falls back to a
+ * fresh start). Only v1 → v2 is currently supported:
+ *   • v1 predates the ship-unlock system → v2 migration grants every
+ *     class already unlocked so legacy players aren't surprise-gated
+ *     behind a system they never opted into. Fresh-start players (no
+ *     save at all) hit the `DEFAULT_UNLOCKED` path instead.
+ */
+function migrate(data: unknown): SaveData | null {
+  if (data == null || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (d.version === CURRENT_VERSION) {
+    return validate(d) ? (d as SaveData) : null;
+  }
+  if (d.version === 1) {
+    // Tack on the new v2 fields with permissive defaults.
+    const upgraded: Record<string, unknown> = {
+      ...d,
+      version: CURRENT_VERSION,
+      unlockedShips: [...SHIP_CLASSES],
+      shipParts: {},
+    };
+    return validate(upgraded) ? (upgraded as SaveData) : null;
+  }
+  return null;
 }
 
 export const SaveManager = {
@@ -89,7 +142,7 @@ export const SaveManager = {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const parsed: unknown = JSON.parse(raw);
-      return validate(parsed) ? (parsed as SaveData) : null;
+      return migrate(parsed);
     } catch {
       return null;
     }
@@ -109,5 +162,80 @@ export const SaveManager = {
     } catch {
       return false;
     }
+  },
+
+  /**
+   * Check whether a ship class is currently unlocked for selection.
+   * Falcon is unconditionally unlocked — the baseline starter.
+   */
+  isUnlocked(cls: ShipClass, save: SaveData | null): boolean {
+    if (cls === 'falcon') return true;
+    if (!save) return false;
+    return save.unlockedShips.includes(cls);
+  },
+
+  /**
+   * Get the current part count for a ship class.
+   */
+  getPartCount(cls: ShipClass, save: SaveData | null): number {
+    if (!save) return 0;
+    return save.shipParts[cls] ?? 0;
+  },
+
+  /**
+   * Award a part to `cls`. Mutates `save` in place and returns
+   * `{ unlocked: true }` if this particular part pushed the class
+   * over the threshold. Caller is responsible for persisting the save
+   * afterwards (so we can batch writes).
+   */
+  awardPart(cls: ShipClass, save: SaveData): { unlocked: boolean; count: number } {
+    if (save.unlockedShips.includes(cls) || cls === 'falcon') {
+      // Already unlocked — nothing to award. Keep counter at threshold.
+      const count = SHIP_PART_UNLOCK_THRESHOLD;
+      save.shipParts[cls] = count;
+      return { unlocked: false, count };
+    }
+    const current = save.shipParts[cls] ?? 0;
+    const next = current + 1;
+    save.shipParts[cls] = next;
+    if (next >= SHIP_PART_UNLOCK_THRESHOLD) {
+      save.unlockedShips.push(cls);
+      return { unlocked: true, count: next };
+    }
+    return { unlocked: false, count: next };
+  },
+
+  /**
+   * Pick a random still-locked ship class. Returns `null` if the
+   * player has already unlocked everything (meteorite drops should
+   * then roll a different reward type or just give XP). Uniform
+   * weighting — every locked ship is equally likely to receive a part.
+   */
+  pickRandomLockedClass(save: SaveData | null): ShipClass | null {
+    const locked = SHIP_CLASSES.filter(
+      (cls) => cls !== 'falcon' && !(save?.unlockedShips ?? []).includes(cls),
+    );
+    if (locked.length === 0) return null;
+    return locked[Math.floor(Math.random() * locked.length)];
+  },
+
+  /**
+   * Build a default save blob for a brand-new player. Only Falcon is
+   * unlocked; every puzzle stage is at 0; no parts collected yet.
+   */
+  defaultSave(shipConfig: ShipConfig, shipStats: ShipDerivedStats): SaveData {
+    const puzzleStages = {} as Record<EraId, 0 | 1 | 2>;
+    for (const era of ERA_IDS) puzzleStages[era] = 0;
+    return {
+      version: CURRENT_VERSION,
+      shipConfig,
+      shipStats,
+      puzzleStages,
+      hp: shipStats.maxHp,
+      shield: shipStats.maxShield,
+      boostEnergy: 1,
+      unlockedShips: [...DEFAULT_UNLOCKED],
+      shipParts: {},
+    };
   },
 };

@@ -14,7 +14,6 @@ import {
   AdditiveBlending,
   BufferAttribute,
   BufferGeometry,
-  Color,
   Points,
   type Scene,
   ShaderMaterial,

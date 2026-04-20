@@ -8,19 +8,19 @@ const GOLD = '#ffd27f';
 const FONT = "'Rajdhani', 'Segoe UI', system-ui, sans-serif";
 
 const STORY_LINES = [
-  'Nello spazio profondo si sono aperti <em>10 wormhole</em>,',
-  'ognuno conduce a un\'era storica fondamentale per la matematica.',
+  'Deep in space, <em>10 wormholes</em> have opened,',
+  'each one leading to a historical era that shaped mathematics.',
   '',
-  'Nascosti nei checkpoint ci sono giochi,',
-  'alcuni storici e dimenticati',
-  '<span class="intro-hl">(Senet di Tutankhamon, Stomachion di Archimede…)</span>,',
-  'altri rivisitati.',
+  'Hidden within the checkpoints are games,',
+  'some ancient and long forgotten',
+  '<span class="intro-hl">(Tutankhamun\'s Senet, Archimedes\' Stomachion…)</span>,',
+  'others reimagined.',
   '',
-  'Non è un\'altra banale avventura spaziale —',
-  'è un percorso attraverso la storia.',
+  'This is not just another space adventure —',
+  'it is a journey through history.',
 ];
 
-const TEASER = 'Personalizza la tua navicella, cerca pezzi nei meteoriti';
+const TEASER = 'Customize your ship, search for parts in meteorites';
 
 export function showIntro(): Promise<void> {
   return new Promise((resolve) => {
@@ -163,11 +163,11 @@ export function showIntro(): Promise<void> {
 </style>
 
 <div class="intro-title">Chronos Voyager</div>
-<div class="intro-subtitle">un viaggio attraverso il tempo</div>
+<div class="intro-subtitle">a journey through time</div>
 <div class="intro-story" id="intro-story"></div>
 <div class="intro-divider" id="intro-divider"></div>
 <div class="intro-teaser" id="intro-teaser">${TEASER}</div>
-<div class="intro-continue" id="intro-continue">Premi qualsiasi tasto · Press any key</div>
+<div class="intro-continue" id="intro-continue">Press any key to continue</div>
 `;
     document.body.appendChild(root);
 

@@ -25,15 +25,18 @@ import {
 } from 'postprocessing';
 import { getAudio } from './core/Audio.ts';
 import { getInput } from './core/Input.ts';
-import { SaveManager, type SaveData } from './core/SaveManager.ts';
+import { SaveManager, SHIP_PART_UNLOCK_THRESHOLD, type SaveData } from './core/SaveManager.ts';
 import type { Era, EraId } from './eras/eras.ts';
 import { ERA_CONTENT } from './eras/eraContent.ts';
 import { getEnvHDR, preloadAssets } from './gameplay/Assets.ts';
 import { sphereVsAabb } from './gameplay/Collision.ts';
 import type { Flow } from './gameplay/Flow.ts';
 import { FlowManager } from './gameplay/FlowManager.ts';
+import { Meteorites, type MeteoriteType } from './gameplay/Meteorites.ts';
+import { Projectiles } from './gameplay/Projectiles.ts';
 import type { Obstacle } from './gameplay/obstacles/types.ts';
 import { DEFAULT_SHIP_STATS, Ship } from './gameplay/Ship.ts';
+import { ExplosionPool } from './render/MeteoriteExplosion.ts';
 import {
   parsePortalQuery,
   PortalSystem,
@@ -42,6 +45,7 @@ import {
 } from './portal/PortalSystem.ts';
 import { assembleShip } from './shipbuilder/ShipAssembly.ts';
 import type { ShipBuilderResult } from './shipbuilder/ShipBuilder.ts';
+import type { ShipConfig } from './shipbuilder/shipTypes.ts';
 import { AstragaloiPuzzle } from './puzzles/Astragaloi.ts';
 import { BooleanGatesPuzzle } from './puzzles/BooleanGates.ts';
 import { CardanoDicePuzzle } from './puzzles/CardanoDice.ts';
@@ -89,6 +93,29 @@ const CRASH_BASE_DAMAGE = 30;
 const CRASH_MIN_DAMAGE = 6;
 /** HP threshold at which we reset HP and deduct an ankh (the old death sub). */
 const HP_RESET_DEDUCT_ANKH = true;
+/** Boost recharge fraction at which the engine reads as "usable" again.
+ *  Below this, the depleted-visual latch stays on (flame choked) even
+ *  though boostEnergy has started climbing off zero. Picking 30% avoids
+ *  the thruster popping from "choked" to "normal" after a single frame
+ *  of recharge tickle — players see a clear stump-then-resume arc. */
+const BOOST_READY_THRESHOLD = 0.3;
+
+/** Every-slot Falcon loadout — used as a fallback when the game is
+ *  constructed without a builder result (dev / portal-inbound fast-path
+ *  doesn't always supply one, and we need SOMETHING to base the default
+ *  save on). Keys match SHIP_SLOTS. */
+const FALLBACK_SHIP_CONFIG: ShipConfig = {
+  hull: 'falcon',
+  cockpit: 'falcon',
+  wing_L: 'falcon',
+  wing_R: 'falcon',
+  engine_main: 'falcon',
+  engine_aux: 'falcon',
+  weapon_primary: 'falcon',
+  weapon_secondary: 'falcon',
+  shield: 'falcon',
+  tail: 'falcon',
+};
 
 export class Game {
   readonly renderer: WebGLRenderer;
@@ -148,10 +175,26 @@ export class Game {
   /** Edge-detect boost key so we only fire the ignition SFX on press, not
    *  on every held frame (otherwise the boost sound would loop at 60Hz). */
   private _wasBoosting = false;
+  /** Latched "engine choked" state: set when boostEnergy bottoms out,
+   *  cleared only after it has recharged past BOOST_READY_THRESHOLD so the
+   *  thruster doesn't pop back to normal the instant the bar starts
+   *  refilling. Passed to Ship via ShipUpdateContext so the flame visibly
+   *  stumps until the reservoir is usable again. */
+  private _boostDepleted = false;
 
   // --- Auto-save timer (every 30s in frame loop) ---
   private autoSaveTimer = 0;
   private static readonly AUTO_SAVE_INTERVAL = 30;
+
+  // --- Free-space combat: meteorite field + player projectiles ---
+  private meteorites: Meteorites | null = null;
+  private projectiles: Projectiles | null = null;
+  private explosions: ExplosionPool | null = null;
+  /** Full save blob we mutate in place when a meteorite drop awards a ship
+   *  part. Persisted via SaveManager.save(); keeping a single object around
+   *  means the ship-parts progression and the existing HP/shield/puzzle
+   *  state live in one source of truth. */
+  private save: SaveData;
 
   // --- Vibe Jam 2026 portal webring ---
   private readonly portalQuery: PortalQuery;
@@ -188,6 +231,17 @@ export class Game {
       this.shield = Math.max(0, Math.min(this.maxShield, loadedSave.shield));
       this.boostEnergy = Math.max(0, Math.min(1, loadedSave.boostEnergy));
     }
+
+    // Source-of-truth save blob, mutated in place when a meteorite drop
+    // awards a ship part. Persisted by `saveProgress()`. When no save
+    // exists yet we manufacture a default one so the rest of the game can
+    // rely on `this.save` being populated (e.g. the drop-to-part hand-off).
+    this.save =
+      loadedSave ??
+      SaveManager.defaultSave(
+        builderResult?.config ?? FALLBACK_SHIP_CONFIG,
+        builderResult?.stats ?? DEFAULT_SHIP_STATS,
+      );
 
     // Apply inbound portal state (clamped): a friend arriving at half HP
     // should keep that damage so the webring feels continuous. Color &
@@ -343,6 +397,7 @@ export class Game {
     }
 
     this.ship.init();
+    this.sparks = new ImpactSparks(this.scene);
     this.celestial.init();
     this.flowManager.init(this.scene);
 
@@ -368,6 +423,37 @@ export class Game {
     // controlled by the SHOW_EXIT_PORTAL feature flag in PortalSystem.ts —
     // inbound handling and the return portal stay active regardless.
     this.portals.init(this.scene);
+
+    // Free-space combat — meteorites, projectiles, explosion VFX. All async
+    // because the GLB models have to fetch before the pools can hand them
+    // out; we do this AFTER `ship.spawn()` so the first spawn frame sees a
+    // stable scene but BEFORE the frame loop so everything's ready on
+    // tick one. If any init rejects we swallow the error and log — better
+    // to lose combat than brick the game at launch.
+    try {
+      const explosions = new ExplosionPool();
+      await explosions.init(this.scene);
+      this.explosions = explosions;
+
+      const meteorites = new Meteorites({
+        onHitShip: (damage) => this.onMeteoriteHit(damage),
+        onDestroyed: (position, scale, type) =>
+          this.onMeteoriteDestroyed(position, scale, type),
+        onDrop: (position, type) => this.onMeteoriteDrop(position, type),
+      });
+      await meteorites.init(this.scene);
+      this.meteorites = meteorites;
+
+      const projectiles = new Projectiles();
+      projectiles.init(this.scene);
+      this.projectiles = projectiles;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[Game] combat init failed', err);
+    }
+
+    // Persist the initial state so a fresh run is saved immediately.
+    this.saveProgress();
 
     this.lastTs = performance.now();
     requestAnimationFrame(this.frame);
@@ -416,7 +502,15 @@ export class Game {
     this.invuln = INVULN_AFTER_CRASH;
     this.shakeRemaining = CRASH_SHAKE_DURATION;
     this.flashRemaining = CRASH_FLASH_DURATION;
+    this.freezeRemaining = CRASH_FREEZE_DURATION;
     this.ensureFlashEl().style.opacity = '1';
+
+    // Spark burst at obstacle world position (local->world: quat * local + origin).
+    const hitWorld = this._scratchC
+      .copy(hit.mesh.position)
+      .applyQuaternion(flow.quaternion)
+      .add(flow.origin);
+    this.sparks.emit(hitWorld, 40);
 
     // Fling the obstacle. Positions/velocities are passed in flow-local frame
     // so the angular + linear response reads correctly regardless of tilt.
@@ -464,6 +558,7 @@ export class Game {
         while (flow.collectibles.losePickup()) lost = true;
         if (lost) this.hud.flashAnkhLoss();
       }
+      this.saveProgress();
     }
     this.hud.updateHpShield(this.hp, this.maxHp, this.shield, this.maxShield);
     this.hud.flashHit();
@@ -519,7 +614,7 @@ export class Game {
     if (this.flashEl) return this.flashEl;
     const el = document.createElement('div');
     el.style.cssText =
-      'position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at center,rgba(255,200,120,0.85),rgba(255,80,30,0.6) 45%,rgba(0,0,0,0) 75%);opacity:0;transition:opacity 120ms ease-out;z-index:999;mix-blend-mode:screen;';
+      'position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at center,rgba(255,40,40,0.7),rgba(200,0,0,0.4) 45%,rgba(0,0,0,0) 75%);opacity:0;transition:opacity 120ms ease-out;z-index:999;mix-blend-mode:screen;';
     document.body.appendChild(el);
     this.flashEl = el;
     return el;
@@ -751,7 +846,7 @@ export class Game {
 
   /**
    * Bail out of the active checkpoint puzzle WITHOUT solving it. Triggered
-   * by the HUD's "Torna alla mappa" button. The player is returned to the
+   * by the HUD's "Return to map" button. The player is returned to the
    * free-space view near Egypt (same spawn used at game start) and the
    * flow's puzzleStage is NOT advanced — so the exact same checkpoint is
    * waiting the next time they collect 10 ankhs in that corridor.
@@ -807,6 +902,11 @@ export class Game {
   /**
    * Persist current game state to localStorage. Called automatically every
    * 30 s from the frame loop, after puzzle completion, and on death reset.
+   *
+   * We mutate `this.save` in place — unlockedShips / shipParts are driven
+   * by the meteorite-drop handlers, so by the time we hit this write those
+   * fields already reflect the latest state. Only the "live" telemetry
+   * (hp/shield/boost/puzzleStages) is refreshed from runtime fields here.
    */
   saveProgress(): void {
     if (!this.builderResult) return; // nothing meaningful to save
@@ -814,16 +914,137 @@ export class Game {
     for (const flow of this.flowManager.flows) {
       puzzleStages[flow.era.id as EraId] = flow.puzzleStage;
     }
-    const data: SaveData = {
-      version: 1,
-      shipConfig: this.builderResult.config,
-      shipStats: this.builderResult.stats,
-      puzzleStages,
-      hp: this.hp,
-      shield: this.shield,
-      boostEnergy: this.boostEnergy,
-    };
-    SaveManager.save(data);
+    this.save.shipConfig = this.builderResult.config;
+    this.save.shipStats = this.builderResult.stats;
+    this.save.puzzleStages = puzzleStages;
+    this.save.hp = this.hp;
+    this.save.shield = this.shield;
+    this.save.boostEnergy = this.boostEnergy;
+    SaveManager.save(this.save);
+  }
+
+  // ---------------------------------------------------------------
+  //  Free-space combat callbacks (meteorite ↔ ship)
+  // ---------------------------------------------------------------
+
+  /**
+   * Meteorite collided with the ship. Mirrors the corridor-crash damage
+   * path: shield-first, then HP bleeds through, invuln window + stun to
+   * sell the impact. No armor subtraction here (meteorites in free space
+   * don't go through the CRASH_BASE_DAMAGE armor reduction — it's raw
+   * touch damage from the config).
+   */
+  private onMeteoriteHit(damage: number): void {
+    if (this.invuln > 0) return;
+    const absorbed = Math.min(this.shield, damage);
+    this.shield -= absorbed;
+    const leftover = damage - absorbed;
+    if (leftover > 0) this.hp = Math.max(0, this.hp - leftover);
+    if (absorbed > 0) getAudio().playShieldHit();
+    if (leftover > 0) getAudio().playCrash();
+    this.shieldRechargeTimer = 0;
+    this.invuln = INVULN_AFTER_CRASH;
+    this.ship.stun();
+    // Same hit-stop / shake / red flash as a corridor crash — these already
+    // exist and read well; just trigger them here too for consistency.
+    this.shakeRemaining = CRASH_SHAKE_DURATION;
+    this.flashRemaining = CRASH_FLASH_DURATION;
+    if (this.flashEl) this.flashEl.style.opacity = '1';
+    this.hud.flashHit();
+  }
+
+  /**
+   * Meteorite finally died (projectile or ship impact). Plays the 5-phase
+   * VFX + proportional camera shake so the burst is tactile. `type` is
+   * forwarded in case a future patch wants per-type drops (e.g. crystal
+   * gives a brighter flash).
+   */
+  private onMeteoriteDestroyed(
+    position: Vector3,
+    scale: number,
+    type: MeteoriteType,
+  ): void {
+    void type;
+    if (this.explosions) this.explosions.play(position, scale);
+    const dist = position.distanceTo(this.ship.group.position);
+    const proximity = Math.max(0, 1 - dist / 120);
+    if (proximity > 0.05) {
+      // Blend into the existing shake timer rather than overwriting — if
+      // two rocks blow up back-to-back the shake should compound briefly,
+      // not reset to the less-recent impact's proximity.
+      this.shakeRemaining = Math.max(
+        this.shakeRemaining,
+        CRASH_SHAKE_DURATION * 0.4 * proximity,
+      );
+    }
+  }
+
+  /**
+   * Meteorite dropped a ship-part reward. Awards it to a random still-
+   * locked ship class. When that class crosses the unlock threshold we
+   * persist immediately and pop a toast so the player knows the hangar
+   * just gained a slot.
+   */
+  private onMeteoriteDrop(position: Vector3, type: MeteoriteType): void {
+    void position;
+    void type;
+    const lockedClass = SaveManager.pickRandomLockedClass(this.save);
+    if (!lockedClass) return; // every ship already unlocked — nothing to award
+    const result = SaveManager.awardPart(lockedClass, this.save);
+    this.saveProgress();
+    // Toast: "Pezzo di <class> raccolto — 2/3" or the unlock flourish.
+    if (result.unlocked) {
+      getAudio().playEraComplete();
+      this.showUnlockToast(`Nave sbloccata: ${lockedClass.toUpperCase()}`, 'unlock');
+    } else {
+      getAudio().playPickup();
+      this.showUnlockToast(
+        `Pezzo raccolto · ${lockedClass.toUpperCase()} ${result.count}/${SHIP_PART_UNLOCK_THRESHOLD}`,
+        'part',
+      );
+    }
+  }
+
+  /**
+   * Brief HUD toast for part-drop / ship-unlock feedback. Builds a single
+   * reused DOM element on first call, then just updates its text and
+   * fades it in/out per call. Not worth a full HUD method — toasts are
+   * the only consumer and a 20-line helper keeps Game.ts self-contained.
+   */
+  private unlockToastEl: HTMLDivElement | null = null;
+  private unlockToastTimer: ReturnType<typeof setTimeout> | null = null;
+  private showUnlockToast(message: string, kind: 'part' | 'unlock'): void {
+    if (!this.unlockToastEl) {
+      const el = document.createElement('div');
+      el.style.cssText =
+        'position:fixed;top:70px;left:50%;transform:translateX(-50%);padding:10px 22px;background:rgba(6,10,22,0.85);border:1px solid rgba(95,180,255,0.45);border-bottom:3px solid #5fc8ff;border-radius:4px;color:#e6faff;font-family:\'Rajdhani\',system-ui,sans-serif;font-size:14px;font-weight:600;letter-spacing:0.1em;backdrop-filter:blur(10px);z-index:45;pointer-events:none;opacity:0;transition:opacity 180ms ease-out;text-align:center;';
+      document.body.appendChild(el);
+      this.unlockToastEl = el;
+    }
+    const el = this.unlockToastEl;
+    el.textContent = message;
+    // Unlock toasts get a warmer accent to signal the bigger moment.
+    el.style.borderBottomColor = kind === 'unlock' ? '#ffd27f' : '#5fc8ff';
+    el.style.opacity = '1';
+    if (this.unlockToastTimer) clearTimeout(this.unlockToastTimer);
+    this.unlockToastTimer = setTimeout(() => {
+      if (this.unlockToastEl) this.unlockToastEl.style.opacity = '0';
+    }, kind === 'unlock' ? 3400 : 1800);
+  }
+
+  /**
+   * Pull the projectile trigger this frame, originating at the ship's nose
+   * along its forward axis. Projectiles internally rate-limit via a
+   * cooldown so calling this every frame while fire is held just translates
+   * to the configured 8 shots / sec.
+   */
+  private readonly _fireOrigin = new Vector3();
+  private readonly _fireForward = new Vector3();
+  private fireFromShipNose(): void {
+    if (!this.projectiles) return;
+    this._fireForward.set(0, 0, -1).applyQuaternion(this.ship.group.quaternion);
+    this._fireOrigin.copy(this.ship.group.position).addScaledVector(this._fireForward, 2.0);
+    this.projectiles.pullTrigger(this._fireOrigin, this._fireForward, this.ship.velocity);
   }
 
   private checkCollisions(): void {
@@ -884,6 +1105,32 @@ export class Game {
       return;
     }
 
+    // Freeze-frame (hit-stop): while the timer is positive, decrement it
+    // but skip all game updates. Only flash/shake/sparks and render proceed
+    // so the scene hangs for ~60 ms on impact, selling the hit.
+    if (this.freezeRemaining > 0) {
+      this.freezeRemaining = Math.max(0, this.freezeRemaining - dt);
+      // Still update flash + shake + sparks + render during freeze.
+      this.sparks.update(dt);
+      if (this.flashRemaining > 0) {
+        this.flashRemaining = Math.max(0, this.flashRemaining - dt);
+        if (this.flashRemaining === 0 && this.flashEl) {
+          this.flashEl.style.opacity = '0';
+        }
+      }
+      if (this.shakeRemaining > 0) {
+        this.shakeRemaining = Math.max(0, this.shakeRemaining - dt);
+        const s = this.shakeRemaining / CRASH_SHAKE_DURATION;
+        const amp = CRASH_SHAKE_MAX * Math.exp(-4 * (1 - s));
+        this.camera.position.x += (Math.random() * 2 - 1) * amp;
+        this.camera.position.y += (Math.random() * 2 - 1) * amp;
+        this.camera.rotation.z += (Math.random() * 2 - 1) * 0.02 * Math.exp(-4 * (1 - s));
+      }
+      this.composer.render(dt);
+      requestAnimationFrame(this.frame);
+      return;
+    }
+
     // Find nearest flow + compute outside factor BEFORE ship.update so the
     // ship knows which axis to align with this frame.
     this.flowManager.update(dt, this.ship.group.position, this.ship.velocity);
@@ -901,6 +1148,7 @@ export class Game {
         flowQuaternion: activeFlow.quaternion,
         flowOrigin: activeFlow.origin,
         localShipPos: this._scratchLocalShip,
+        boostDepleted: this._boostDepleted,
       });
       if (this.invuln > 0) this.invuln -= dt;
       this.checkCollisions();
@@ -909,6 +1157,12 @@ export class Game {
       this.regenerate(dt);
       const boostingNow = input.boost && this.boostEnergy > 0;
       this.updateBoostEnergy(dt, boostingNow);
+      // Depleted-state latch. Flip on at empty so the thruster chokes
+      // visibly; flip off only after the bar refills past the "usable"
+      // threshold so we don't pop between states on single-frame recharge
+      // jitter. Reads on the ship next frame via ctx.boostDepleted.
+      if (this.boostEnergy <= 0) this._boostDepleted = true;
+      else if (this.boostEnergy >= BOOST_READY_THRESHOLD) this._boostDepleted = false;
       // Edge-trigger: play the rising whoosh once when boost kicks in, not
       // every frame it's held. Released-then-pressed re-arms the SFX.
       if (boostingNow && !this._wasBoosting) getAudio().playBoost();
@@ -919,6 +1173,23 @@ export class Game {
       if (this.shieldMesh) this.shieldMesh.visible = this.shield > 0;
       this.hud.updateHpShield(this.hp, this.maxHp, this.shield, this.maxShield);
       this.hud.setBoostReady(this.boostEnergy);
+
+      // Free-space combat tick. Meteorites only spawn when outside a
+      // corridor (`freeSpaceOnly` in the config) — we gate via
+      // outsideFactor rather than `activeFlow == null` because the flow
+      // manager always has an "active" flow (nearest), but outsideFactor
+      // > 0.7 means we're meaningfully in open space. Projectiles update
+      // every frame regardless so bullets fired inside the corridor still
+      // fly and despawn on range.
+      if (this.meteorites) {
+        const canSpawn = outside > 0.7;
+        this.meteorites.update(dt, this.ship.group.position, this.ship.velocity, canSpawn);
+      }
+      if (this.projectiles) {
+        if (input.fire) this.fireFromShipNose();
+        if (this.meteorites) this.projectiles.update(dt, this.meteorites);
+      }
+      if (this.explosions) this.explosions.update(dt);
     }
 
     // Vibe Jam portal tick — spins rings, twinkles particles, and if the
@@ -1012,9 +1283,11 @@ export class Game {
     if (this.shakeRemaining > 0) {
       this.shakeRemaining = Math.max(0, this.shakeRemaining - dt);
       const s = this.shakeRemaining / CRASH_SHAKE_DURATION;
-      const amp = CRASH_SHAKE_MAX * s * s;
+      const amp = CRASH_SHAKE_MAX * Math.exp(-4 * (1 - s));
       this.camera.position.x += (Math.random() * 2 - 1) * amp;
       this.camera.position.y += (Math.random() * 2 - 1) * amp;
+      // Rotational jitter — subtle roll wobble that decays with the shake.
+      this.camera.rotation.z += (Math.random() * 2 - 1) * 0.02 * Math.exp(-4 * (1 - s));
     }
     this.camera.lookAt(lookTarget);
 
@@ -1024,6 +1297,16 @@ export class Game {
     const latSpeed = Math.hypot(this.ship.velocity.x, this.ship.velocity.y) + 40;
     const distance = Math.max(0, -this._scratchLocalShip.z);
     this.hud.update(dt, latSpeed, distance);
+
+    // Periodic auto-save (every 30 s) — simple dt accumulator, no setInterval.
+    this.autoSaveTimer += dt;
+    if (this.autoSaveTimer >= Game.AUTO_SAVE_INTERVAL) {
+      this.autoSaveTimer = 0;
+      this.saveProgress();
+    }
+
+    // Tick impact spark particles.
+    this.sparks.update(dt);
 
     this.composer.render(dt);
     requestAnimationFrame(this.frame);

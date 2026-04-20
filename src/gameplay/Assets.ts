@@ -50,9 +50,29 @@ export const MODEL_NAMES = [
   'codebreakers_terminal',
   'codebreakers_mainframe',
   'codebreakers_binary',
+  // Propulsion-flame trails. Shipped as two tiny (~8KB) cone GLBs so the
+  // Thruster can clone them per-ship and tint them with the engine palette
+  // rather than build ConeGeometry in code. Stored under /models/effects/
+  // to keep the root /models/ directory focused on era-content pieces.
+  'engine_trail',
+  'engine_trail_core',
 ] as const;
 
 export type ModelName = (typeof MODEL_NAMES)[number];
+
+/**
+ * Models that live under /models/effects/<name>.glb rather than the flat
+ * /models/<name>.glb path. Segregated so era-content pieces don't pollute
+ * the effects directory and vice-versa.
+ */
+const EFFECT_MODELS: ReadonlySet<ModelName> = new Set<ModelName>([
+  'engine_trail',
+  'engine_trail_core',
+]);
+
+function modelUrl(name: ModelName): string {
+  return EFFECT_MODELS.has(name) ? `/models/effects/${name}.glb` : `/models/${name}.glb`;
+}
 
 const models = new Map<ModelName, Group>();
 let envHDR: DataTexture | null = null;
@@ -65,7 +85,7 @@ export async function preloadAssets(): Promise<void> {
     loader.loadAsync(url).then((g) => g.scene as unknown as Group);
   // 'ankh' is built procedurally — don't fetch the legacy key-shaped GLB.
   const toFetch = MODEL_NAMES.filter((n) => n !== 'ankh');
-  const modelPromises = toFetch.map((n) => fetchScene(`/models/${n}.glb`));
+  const modelPromises = toFetch.map((n) => fetchScene(modelUrl(n)));
   const [modelResults, hdr] = await Promise.all([
     Promise.all(modelPromises),
     rgbe.loadAsync('/hdri/desert_1k.hdr'),

@@ -53,6 +53,11 @@ export interface ShipUpdateContext {
   flowOrigin: Vector3;
   /** Ship position in the active flow's local frame — used for exit-ease side. */
   localShipPos: Vector3;
+  /** True while the boost reservoir has been drained and hasn't yet refilled
+   *  to the "ready" threshold. The Thruster visually chokes the flame in
+   *  response — muted halo, short flicker, low opacity — so the failure
+   *  reads even when the player isn't watching the HUD bar. */
+  boostDepleted: boolean;
 }
 
 /**
@@ -353,7 +358,7 @@ export class Ship {
       const maxRef = Math.max(1, this.stats.maxThrustSpeed);
       const currentSpd = free ? this.thrustVel.length() : this.stats.baseSpeed;
       const throttle = Math.min(1, currentSpd / maxRef) * speedFactor;
-      this.thruster.update(dt, throttle, input.boost);
+      this.thruster.update(dt, throttle, input.boost, ctx.boostDepleted);
     }
 
     this.wasFree = free;

@@ -7,7 +7,7 @@ import { parsePortalQuery } from './portal/PortalSystem.ts';
 import { presetConfig } from './shipbuilder/StatsCalculator.ts';
 import { showIntro } from './ui/IntroScreen.ts';
 import type { ShipBuilderResult } from './shipbuilder/ShipBuilder.ts';
-import { SaveManager } from './core/SaveManager.ts';
+import { SaveManager, type SaveData } from './core/SaveManager.ts';
 
 /**
  * Boot sequence:
@@ -46,7 +46,7 @@ renderer.toneMappingExposure = 1.0;
 const portalQuery = parsePortalQuery();
 
 let result: ShipBuilderResult;
-let loadedSave = false;
+let savedData: SaveData | undefined;
 if (portalQuery.fromPortal) {
   // Inbound from the jam webring — skip the hangar entirely. Use a Falcon
   // baseline (fast + agile, most friendly for an unprepared pilot) and let
@@ -57,23 +57,22 @@ if (portalQuery.fromPortal) {
     stats: { ...DEFAULT_SHIP_STATS },
   };
 } else {
-  // Check for an existing save — if present, skip the intro + ShipBuilder
-  // and resume with the saved loadout + progress.
+  // Always show the ShipBuilder unless the player came in through the
+  // jam portal. A returning player with a save still visits the hangar
+  // so they can SELECT any newly-unlocked ship (parts earned from
+  // meteorite drops only matter if the player gets to pick the ship
+  // those parts unlocked). The intro screen runs only the very first
+  // time (no save yet) — it's a story beat, not a settings screen.
   const save = SaveManager.load();
-  if (save) {
-    result = { config: save.shipConfig, stats: save.shipStats };
-    loadedSave = true;
-  } else {
+  savedData = save ?? undefined;
+  if (!save) {
     await showIntro();
-    const builder = new ShipBuilder(renderer);
-    await builder.start();
-    result = await builder.launchPromise;
   }
+  const builder = new ShipBuilder(renderer, save);
+  await builder.start();
+  result = await builder.launchPromise;
 }
 
-const game = new Game(
-  canvas, renderer, result, portalQuery,
-  loadedSave ? SaveManager.load()! : undefined,
-);
+const game = new Game(canvas, renderer, result, portalQuery, savedData);
 (window as unknown as { __game: Game }).__game = game;
 await game.start();

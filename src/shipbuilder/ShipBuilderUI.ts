@@ -7,6 +7,7 @@ import {
   type ShipsConfigJson,
   type ShipSlot,
 } from './shipTypes.ts';
+import { SaveManager, SHIP_PART_UNLOCK_THRESHOLD, type SaveData } from '../core/SaveManager.ts';
 
 /**
  * DOM overlay for the ship builder. Pure DOM — no framework — so it loads
@@ -29,6 +30,10 @@ import {
 export interface ShipBuilderUIProps {
   registry: ShipsConfigJson;
   initialConfig: ShipConfig;
+  /** Persisted save so we can gate ship-class selection behind the unlock
+   *  system. When null (fresh player) only Falcon is unlocked. Passed in
+   *  from main.ts → ShipBuilder → here. */
+  save: SaveData | null;
   onConfigChange(next: ShipConfig): void;
   onLaunch(): void;
 }
@@ -106,12 +111,38 @@ export class ShipBuilderUI {
       btn.className = 'sb-preset';
       btn.dataset.cls = cls;
       const shipInfo = this.props.registry.ships[cls];
-      btn.innerHTML = `
-        <div class="sb-preset-name">${shipInfo.name}</div>
-        <div class="sb-preset-class">${shipInfo.class}</div>
-      `;
-      btn.title = shipInfo.description;
-      btn.addEventListener('click', () => this.applyPreset(cls));
+      const unlocked = SaveManager.isUnlocked(cls, this.props.save);
+      const partCount = SaveManager.getPartCount(cls, this.props.save);
+
+      if (unlocked) {
+        btn.innerHTML = `
+          <div class="sb-preset-name">${shipInfo.name}</div>
+          <div class="sb-preset-class">${shipInfo.class}</div>
+        `;
+        btn.title = shipInfo.description;
+        btn.addEventListener('click', () => this.applyPreset(cls));
+      } else {
+        // Locked preset: greyed out, padlock glyph above the name, progress
+        // count beneath showing parts collected / parts required. Click is
+        // still bound but just flashes a short "locked" animation on the
+        // button itself — no side-effect on the config. A tooltip explains
+        // the mechanic so a player who's never shot a meteorite understands
+        // what they're looking at.
+        btn.classList.add('sb-preset--locked');
+        btn.innerHTML = `
+          <div class="sb-preset-lock">🔒</div>
+          <div class="sb-preset-name">${shipInfo.name}</div>
+          <div class="sb-preset-class">${partCount}/${SHIP_PART_UNLOCK_THRESHOLD} pezzi</div>
+        `;
+        btn.title =
+          `${shipInfo.name} · Bloccata\n` +
+          `Distruggi meteoriti nello spazio aperto per trovare pezzi di questa nave (${partCount}/${SHIP_PART_UNLOCK_THRESHOLD}).`;
+        btn.addEventListener('click', () => {
+          btn.classList.remove('sb-preset--shake');
+          void btn.offsetWidth; // reflow to restart animation
+          btn.classList.add('sb-preset--shake');
+        });
+      }
       presets.appendChild(btn);
     }
     bottom.appendChild(presets);
@@ -585,6 +616,51 @@ const CSS = `
   color: rgba(159, 230, 255, 0.6);
   text-transform: uppercase;
   margin-top: 2px;
+}
+.sb-preset--locked {
+  /* Locked cards read as disabled — lower contrast, padlock on top,
+   * dashed accent to match the "not available" visual language. The
+   * default :hover from `.sb-preset` is overridden to a muted state so
+   * the button doesn't feel actionable (even though we keep the click
+   * handler for the shake feedback). */
+  filter: grayscale(0.85);
+  opacity: 0.58;
+  cursor: not-allowed;
+  border-style: dashed;
+  border-color: rgba(180, 180, 200, 0.35);
+  background: rgba(18, 18, 26, 0.55);
+}
+.sb-preset--locked:hover {
+  transform: none;
+  background: rgba(24, 24, 34, 0.7);
+  border-color: rgba(200, 200, 220, 0.5);
+}
+.sb-preset-lock {
+  font-size: 14px;
+  line-height: 1;
+  margin-bottom: 3px;
+  filter: drop-shadow(0 0 4px rgba(255, 210, 127, 0.25));
+}
+.sb-preset--locked .sb-preset-name {
+  color: rgba(230, 230, 240, 0.75);
+}
+.sb-preset--locked .sb-preset-class {
+  color: rgba(255, 210, 127, 0.85);
+  letter-spacing: 0.06em;
+  text-transform: none;
+  font-weight: 600;
+  font-size: 10px;
+}
+.sb-preset--shake {
+  animation: sb-preset-shake 0.35s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+@keyframes sb-preset-shake {
+  0% { transform: translateX(0); }
+  20% { transform: translateX(-3px); }
+  40% { transform: translateX(3px); }
+  60% { transform: translateX(-2px); }
+  80% { transform: translateX(2px); }
+  100% { transform: translateX(0); }
 }
 
 .sb-launch {

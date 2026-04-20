@@ -21,6 +21,7 @@ import {
   VignetteEffect,
 } from 'postprocessing';
 import { getAudio } from '../core/Audio.ts';
+import type { SaveData } from '../core/SaveManager.ts';
 import { assembleShip, prefetchConfig } from './ShipAssembly.ts';
 import {
   computeDerivedStats,
@@ -78,6 +79,9 @@ export class ShipBuilder {
 
   private ui!: ShipBuilderUI;
   private stars: ReturnType<typeof makeStarField>;
+  /** Save data forwarded to the UI so the preset row can mark locked ships.
+   *  Null for fresh players — the UI then treats only Falcon as unlocked. */
+  private readonly save: SaveData | null = null;
 
   // Orbit camera state — azimuth (around Y), elevation (from horizon), zoom.
   private azimuth = Math.PI * 0.25;
@@ -145,8 +149,9 @@ export class ShipBuilder {
     this.lastInteractionTs = performance.now();
   };
 
-  constructor(renderer: WebGLRenderer) {
+  constructor(renderer: WebGLRenderer, save: SaveData | null = null) {
     this.renderer = renderer;
+    this.save = save;
     this.camera = new PerspectiveCamera(
       38,
       window.innerWidth / window.innerHeight,
@@ -253,6 +258,7 @@ export class ShipBuilder {
     this.ui = new ShipBuilderUI({
       registry: this.registry,
       initialConfig: this.config,
+      save: this.save,
       onConfigChange: (next) => this.onConfigChange(next),
       onLaunch: () => this.onLaunch(),
     });

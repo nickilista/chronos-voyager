@@ -1,755 +1,730 @@
 import {
-  BoxGeometry,
-  CanvasTexture,
-  CylinderGeometry,
+  Color,
   DoubleSide,
-  LinearFilter,
   Mesh,
   MeshStandardMaterial,
   PerspectiveCamera,
   PlaneGeometry,
+  PointLight,
+  RingGeometry,
   Vector2,
-  Vector3,
 } from 'three';
 import { Puzzle } from './PuzzleBase.ts';
 
 /**
- * Senet — port of the iOS Chronos Mathematica "egypt_senet_02" level.
+ * Senet — aligned with the iOS "Chronos Mathematica" SenetGameView.
  *
- * 3 Ankh pieces (gold) vs 3 Eye-of-Horus pieces (blue) on a 3×10 S-path.
- * Rules match the app:
- *  - Rolls from 4 throw sticks: marked count → 1,2,3,4 with 0 marked ⇒ 5.
- *  - Rolling 1, 4, 5 grants an extra turn.
- *  - Backward moves allowed only when no forward move exists.
- *  - Exit on square 30 requires exact roll; overshoot bounces back from 30.
- *  - Capture isolated opponent; piece with an adjacent friend is protected.
- *  - Special squares: 15 Rebirth, 26 Beauty (safe + extra), 27 Water (back
- *    near 15), 28 Three Truths, 29 Re-Atoum, 30 Departure.
- *  - Math traps on squares 7, 14, 21 — solve to keep your progress, fail
- *    (or time out) and the piece snaps back to where it stood.
- *  - Event banners for capture, water, beauty, rebirth, traps, victory,
- *    defeat, drawn as centered papyrus cards with an Egyptian border.
+ * 3×10 S-path board (positions 0-29, 30 = off-board).
+ * Player: Ankh pieces (gold). Opponent: Eye of Horus pieces (blue).
+ *
+ * Key iOS mechanics ported:
+ *   - 4 throw sticks: marked count = roll (0 marked => 5). Extra turn on 1/4/5.
+ *   - Smart player roll (best of 2), disadvantage AI roll (worst of 2).
+ *   - Forward moves primary; backward only when no forward exists (level >= 2).
+ *   - Exit: pieces on square >= 27 exit with exact roll; overshoot bounces back.
+ *   - Capture: land on lone enemy (swap positions). Adjacent friend = protected.
+ *   - Special squares: 14 Rebirth, 25 Beauty (safe + extra), 26 Water (drown, respawn near 14),
+ *     27 Three Truths, 28 Re-Atum, 29 Departure.
+ *   - Math traps (level-based positions). 10s timer, numpad input. Fail => piece retreats.
+ *   - Level-based piece count, max turns, trap squares, question difficulty.
+ *   - Canvas 2D board rendering + DOM overlay (MokshaPatam pattern).
+ *   - Three.js backdrop (ground, decorative ring, point light).
  */
+
+/* ── Board config ─────────────────────────────────────────────── */
 
 const COLS = 10;
 const ROWS = 3;
-const CELL = 1.35;
-const BOARD_W = COLS * CELL;
-const BOARD_D = ROWS * CELL;
-
-const PIECE_R = 0.5;
-const PIECE_H = 0.22;
-const PIECE_FACE = 0.92;
-
-const PATH_END = 30;
-const OFF_BOARD = 31;
-
-const COLOR_PLAYER = 0xf5d060;
-const COLOR_OPPONENT = 0x4a7acc;
-const COLOR_PLAYER_CSS = '#f5d060';
-const COLOR_OPPONENT_CSS = '#4a7acc';
-const COLOR_OPP_STROKE_CSS = '#1e3a6e';
-const COLOR_OPP_PUPIL_CSS = '#0d1b2a';
-
-const HIGHLIGHT = 0x7fff9a;
-const THOTH_PURPLE = 0x7b2d8e;
-
-const STICK_DUR = 0.85;
-const AI_DELAY = 0.9;
-const ANIM_DUR = 0.4;
+const OFF_BOARD = 30;
+const CELL_PX = 36;
+const BOARD_W = COLS * CELL_PX;
+const BOARD_H = ROWS * CELL_PX;
 const TRAP_TIME = 10;
-const BANNER_TIME = 2.6;
 
-type Side = 'player' | 'opponent';
-type Phase =
-  | 'idle'
-  | 'rolling'
-  | 'await-move'
-  | 'moving'
-  | 'trap'
-  | 'ai-wait'
-  | 'ai-rolling'
-  | 'ai-moving'
-  | 'won'
-  | 'lost';
+/* ── Colors (Egyptian theme, matches iOS) ────────────────────── */
 
-interface Piece {
-  readonly mesh: Mesh;
-  readonly decal: Mesh;
-  side: Side;
-  square: number; // 1..30; 31 = exited
-  preTrapSquare: number;
-  anim: { from: Vector3; to: Vector3; t: number; dur: number; active: boolean; hop: number };
+const C_CELL_ALT = '#3B2A16';
+const C_CELL_DARK = '#2F2111';
+const C_GOLD = '#D4A843';
+const C_GOLD_LIGHT = '#F5D060';
+const C_SAND = '#E8D5A3';
+const C_DEEP_BROWN = '#2C1810';
+const C_WATER_BLUE = '#4A90D9';
+const C_DANGER_RED = '#D94444';
+const C_SPIRIT_GREEN = '#44B87A';
+const C_THOTH_PURPLE = '#7B2D8E';
+const C_PLAYER = '#F5D060';
+const C_OPPONENT = '#4A7ACC';
+const C_OPPONENT_STROKE = '#1E3A6E';
+const C_OPPONENT_PUPIL = '#0D1B2A';
+const C_CREAM = '#F5E6CC';
+
+/* ── Level config (matches iOS) ──────────────────────────────── */
+
+const PIECE_COUNTS = [2, 3, 4, 5, 5];
+const MAX_TURNS_BY_LEVEL = [40, 50, 60, 70, 90];
+
+function mathTrapSquares(level: number): Set<number> {
+  switch (level) {
+    case 1: return new Set([8, 18]);
+    case 2: return new Set([6, 13, 20]);
+    case 3: return new Set([5, 11, 17, 22]);
+    default: return new Set([4, 9, 15, 19, 23]);
+  }
 }
 
-interface SpecialSquare {
-  icon: string;
-  title: string;
-  color: string;
-  bg: string;
-}
+/* ── Special squares ─────────────────────────────────────────── */
 
-const SPECIAL: Record<number, SpecialSquare> = {
-  15: { icon: '☥', title: 'House of Rebirth', color: '#44b87a', bg: '#1a2e1a' },
-  26: { icon: '✦', title: 'House of Beauty', color: '#d4a843', bg: '#2e2510' },
-  27: { icon: '〰', title: 'House of Water', color: '#4a90d9', bg: '#0f1e2e' },
-  28: { icon: 'III', title: 'House of Three Truths', color: '#e8a030', bg: '#2e1f0a' },
-  29: { icon: 'II', title: 'House of Re-Atoum', color: '#e8a030', bg: '#2e1f0a' },
-  30: { icon: '☀', title: 'House of Departure', color: '#d4a843', bg: '#2e2510' },
+interface SpecialInfo { icon: string; title: string; color: string; bg: string }
+
+const SPECIAL: Record<number, SpecialInfo> = {
+  14: { icon: '\u2625', title: 'House of Rebirth', color: C_SPIRIT_GREEN, bg: '#1A2E1A' },
+  25: { icon: '\u2726', title: 'House of Beauty', color: C_GOLD, bg: '#2E2510' },
+  26: { icon: '\u301C', title: 'House of Water', color: C_WATER_BLUE, bg: '#0F1E2E' },
+  27: { icon: 'III', title: 'House of Three Truths', color: '#E8A030', bg: '#2E1F0A' },
+  28: { icon: 'II', title: 'House of Re-Atum', color: '#E8A030', bg: '#2E1F0A' },
+  29: { icon: '\u2600', title: 'House of Departure', color: C_GOLD, bg: '#2E2510' },
 };
-const MATH_TRAP_SQUARES = new Set([7, 14, 21]);
 
-function pathToRC(n: number): { row: number; col: number } {
-  const row = Math.floor((n - 1) / COLS);
-  const base = row * COLS;
-  const inRow = n - 1 - base;
-  const col = row % 2 === 0 ? inRow : COLS - 1 - inRow;
+/* ── Board layout helpers ────────────────────────────────────── */
+
+/** Convert position (0-29) to (row, col) on the S-path. Row 0: L-R, Row 1: R-L, Row 2: L-R */
+function posToRowCol(pos: number): { row: number; col: number } {
+  const row = Math.floor(pos / COLS);
+  const col = row === 1 ? COLS - 1 - (pos - COLS) : pos % COLS;
   return { row, col };
 }
 
-function squareWorld(n: number): Vector3 {
-  const { row, col } = pathToRC(n);
-  const x = -BOARD_W / 2 + (col + 0.5) * CELL;
-  const z = -BOARD_D / 2 + (row + 0.5) * CELL;
-  return new Vector3(x, PIECE_H / 2 + 0.02, z);
+function rowColToPos(row: number, col: number): number {
+  if (row === 0) return col;
+  if (row === 1) return 10 + (COLS - 1 - col);
+  return 20 + col;
 }
 
-function rand(a: number, b: number): number {
-  return a + Math.random() * (b - a);
+function cellCenter(pos: number): { x: number; y: number } {
+  const { row, col } = posToRowCol(pos);
+  return { x: col * CELL_PX + CELL_PX * 0.5, y: row * CELL_PX + CELL_PX * 0.5 };
 }
+
 function randInt(a: number, b: number): number {
-  return Math.floor(rand(a, b + 1));
+  return a + Math.floor(Math.random() * (b - a + 1));
 }
 
-/* ------------------------- Canvas texture helpers ------------------------- */
+/* ── Math trap generation (matches iOS per-level) ────────────── */
 
-function makePieceTexture(side: Side): CanvasTexture {
-  const size = 256;
-  const c = document.createElement('canvas');
-  c.width = c.height = size;
-  const g = c.getContext('2d');
-  if (!g) return new CanvasTexture(c);
+interface Trap { prompt: string; answer: number }
 
-  // Pedestal disc (warm stone for player, cool stone for opponent).
-  const cx = size / 2;
-  const cy = size / 2;
-  const rOuter = size * 0.48;
-  const rad = g.createRadialGradient(cx, cy, rOuter * 0.1, cx, cy, rOuter);
-  if (side === 'player') {
-    rad.addColorStop(0, '#d7b465');
-    rad.addColorStop(1, '#6e4a1a');
-  } else {
-    rad.addColorStop(0, '#4e6cae');
-    rad.addColorStop(1, '#18233f');
-  }
-  g.fillStyle = rad;
-  g.beginPath();
-  g.arc(cx, cy, rOuter, 0, Math.PI * 2);
-  g.fill();
+function generateTrap(level: number): Trap {
+  // ~30% historical/trivia
+  if (Math.random() < 0.3) return generateHistoricalTrap();
 
-  // Inner rim
-  g.strokeStyle = side === 'player' ? '#2b1b07' : '#0b1428';
-  g.lineWidth = size * 0.025;
-  g.beginPath();
-  g.arc(cx, cy, rOuter * 0.88, 0, Math.PI * 2);
-  g.stroke();
-
-  if (side === 'player') drawAnkh(g, cx, cy, rOuter * 0.62);
-  else drawEye(g, cx, cy, rOuter * 0.58);
-
-  const tex = new CanvasTexture(c);
-  tex.minFilter = LinearFilter;
-  tex.magFilter = LinearFilter;
-  return tex;
-}
-
-function drawAnkh(g: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
-  g.save();
-  g.strokeStyle = COLOR_PLAYER_CSS;
-  g.fillStyle = COLOR_PLAYER_CSS;
-  g.lineWidth = Math.max(3, r * 0.22);
-  g.lineCap = 'round';
-  g.lineJoin = 'round';
-
-  // Teardrop loop at the top.
-  g.beginPath();
-  g.ellipse(cx, cy - r * 0.5, r * 0.38, r * 0.5, 0, 0, Math.PI * 2);
-  g.stroke();
-
-  // Vertical shaft
-  g.beginPath();
-  g.moveTo(cx, cy - r * 0.02);
-  g.lineTo(cx, cy + r * 0.95);
-  g.stroke();
-
-  // Crossbar
-  g.beginPath();
-  g.moveTo(cx - r * 0.55, cy + r * 0.18);
-  g.lineTo(cx + r * 0.55, cy + r * 0.18);
-  g.stroke();
-
-  g.restore();
-}
-
-function drawEye(g: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
-  g.save();
-  g.fillStyle = COLOR_OPPONENT_CSS;
-  g.strokeStyle = COLOR_OPP_STROKE_CSS;
-  g.lineWidth = Math.max(2, r * 0.11);
-  g.lineJoin = 'round';
-
-  // Almond outline using two quadratic curves.
-  g.beginPath();
-  g.moveTo(cx - r, cy);
-  g.quadraticCurveTo(cx, cy - r * 0.8, cx + r, cy);
-  g.quadraticCurveTo(cx, cy + r * 0.55, cx - r, cy);
-  g.closePath();
-  g.fill();
-  g.stroke();
-
-  // Iris
-  g.fillStyle = '#8aa8e0';
-  g.beginPath();
-  g.arc(cx, cy - r * 0.02, r * 0.42, 0, Math.PI * 2);
-  g.fill();
-
-  // Pupil
-  g.fillStyle = COLOR_OPP_PUPIL_CSS;
-  g.beginPath();
-  g.arc(cx, cy - r * 0.02, r * 0.22, 0, Math.PI * 2);
-  g.fill();
-
-  // Hieroglyphic tail (the Eye of Horus drop).
-  g.strokeStyle = COLOR_OPP_STROKE_CSS;
-  g.lineWidth = Math.max(2, r * 0.1);
-  g.lineCap = 'round';
-  g.beginPath();
-  g.moveTo(cx - r * 0.95, cy + r * 0.1);
-  g.quadraticCurveTo(cx - r * 0.75, cy + r * 0.55, cx - r * 0.4, cy + r * 0.55);
-  g.stroke();
-
-  g.restore();
-}
-
-function makeSquareTexture(n: number): CanvasTexture {
-  const size = 128;
-  const c = document.createElement('canvas');
-  c.width = c.height = size;
-  const g = c.getContext('2d');
-  if (!g) return new CanvasTexture(c);
-
-  const special = SPECIAL[n];
-  const trap = MATH_TRAP_SQUARES.has(n);
-
-  // Base.
-  let bg = '#2a1f14';
-  if (special) bg = special.bg;
-  else if (trap) bg = '#1e0f2e';
-  else bg = (Math.floor((n - 1) / COLS) + (n - 1)) % 2 === 0 ? '#3b2a16' : '#2f2111';
-  g.fillStyle = bg;
-  g.fillRect(0, 0, size, size);
-
-  // Corner glyph decoration.
-  g.fillStyle = 'rgba(201, 168, 76, 0.35)';
-  const d = 10;
-  g.fillRect(6, 6, d, 2);
-  g.fillRect(6, 6, 2, d);
-  g.fillRect(size - 6 - d, 6, d, 2);
-  g.fillRect(size - 8, 6, 2, d);
-  g.fillRect(6, size - 8, d, 2);
-  g.fillRect(6, size - 6 - d, 2, d);
-  g.fillRect(size - 6 - d, size - 8, d, 2);
-  g.fillRect(size - 8, size - 6 - d, 2, d);
-
-  // Border
-  g.strokeStyle = special
-    ? special.color
-    : trap
-      ? 'rgba(123, 45, 142, 0.6)'
-      : 'rgba(201, 168, 76, 0.25)';
-  g.lineWidth = special ? 3 : 2;
-  g.strokeRect(2, 2, size - 4, size - 4);
-
-  if (special) {
-    g.fillStyle = special.color;
-    g.font = special.icon.length > 1 ? 'bold 36px serif' : 'bold 64px serif';
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.fillText(special.icon, size / 2, size / 2 + 4);
-    g.font = '11px system-ui';
-    g.fillStyle = special.color;
-    g.fillText(String(n), size / 2, size - 12);
-  } else if (trap) {
-    drawThothIbis(g, size / 2, size / 2, 38);
-    g.fillStyle = '#b77ccc';
-    g.font = '11px system-ui';
-    g.textAlign = 'center';
-    g.fillText(String(n), size / 2, size - 12);
-  } else {
-    g.fillStyle = 'rgba(245,208,96,0.5)';
-    g.font = '13px system-ui';
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.fillText(String(n), size / 2, size / 2 + 4);
-  }
-
-  const tex = new CanvasTexture(c);
-  tex.minFilter = LinearFilter;
-  tex.magFilter = LinearFilter;
-  return tex;
-}
-
-function drawThothIbis(
-  g: CanvasRenderingContext2D,
-  cx: number,
-  cy: number,
-  r: number,
-): void {
-  g.save();
-  g.strokeStyle = 'rgba(123, 45, 142, 0.85)';
-  g.lineWidth = Math.max(2, r * 0.12);
-  g.lineCap = 'round';
-  // Body/head blob
-  g.beginPath();
-  g.ellipse(cx, cy - r * 0.1, r * 0.45, r * 0.5, 0, 0, Math.PI * 2);
-  g.stroke();
-  // Curved beak
-  g.beginPath();
-  g.moveTo(cx + r * 0.35, cy);
-  g.quadraticCurveTo(cx + r * 0.9, cy + r * 0.2, cx + r * 0.5, cy + r * 0.7);
-  g.stroke();
-  // Eye dot
-  g.fillStyle = 'rgba(200,150,230,0.9)';
-  g.beginPath();
-  g.arc(cx - r * 0.15, cy - r * 0.2, r * 0.07, 0, Math.PI * 2);
-  g.fill();
-  g.restore();
-}
-
-function makeStickTexture(lightSide: boolean): CanvasTexture {
-  const w = 256;
-  const h = 48;
-  const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
-  const g = c.getContext('2d');
-  if (!g) return new CanvasTexture(c);
-  const grad = g.createLinearGradient(0, 0, 0, h);
-  if (lightSide) {
-    grad.addColorStop(0, '#f5d060');
-    grad.addColorStop(1, '#b48526');
-  } else {
-    grad.addColorStop(0, '#2c1810');
-    grad.addColorStop(1, '#0f0904');
-  }
-  g.fillStyle = grad;
-  g.fillRect(0, 0, w, h);
-  // Hieroglyph-like marks on the light side only.
-  if (lightSide) {
-    g.fillStyle = 'rgba(30, 15, 4, 0.85)';
-    for (let i = 0; i < 3; i++) {
-      const x = w * (0.25 + i * 0.25);
-      g.fillRect(x - 2, h * 0.25, 4, h * 0.5);
-      g.beginPath();
-      g.arc(x, h * 0.25, 4, 0, Math.PI * 2);
-      g.fill();
+  switch (level) {
+    case 1: {
+      const ops = randInt(0, 5);
+      if (ops === 0) { const a = randInt(12, 45), b = randInt(11, 35); return { prompt: `${a} + ${b} = ?`, answer: a + b }; }
+      if (ops === 1) { const big = randInt(30, 70), small = randInt(11, big - 5); return { prompt: `${big} \u2212 ${small} = ?`, answer: big - small }; }
+      if (ops === 2) { const a = randInt(12, 25); return { prompt: `${a} + ${a} = ?`, answer: a * 2 }; }
+      if (ops === 3) { const s = randInt(10, 20), st = randInt(3, 7); return { prompt: `${s}, ${s + st}, ${s + 2 * st}, ... ?`, answer: s + 3 * st }; }
+      if (ops === 4) { const baskets = randInt(5, 12), figs = randInt(3, 8); return { prompt: `Baskets of figs: ${baskets} \u00d7 ${figs} = ?`, answer: baskets * figs }; }
+      { const rows = randInt(4, 9), cols = randInt(3, 7); return { prompt: `Columns of soldiers: ${rows} \u00d7 ${cols} = ?`, answer: rows * cols }; }
+    }
+    case 2: {
+      const ops = randInt(0, 6);
+      if (ops === 0) { const a = randInt(6, 15), b = randInt(4, 12); return { prompt: `${a} \u00d7 ${b} = ?`, answer: a * b }; }
+      if (ops === 1) { const a = randInt(11, 25); return { prompt: `${a} \u2192 ${a * 2} \u2192 ?  (double)`, answer: a * 4 }; }
+      if (ops === 2) { const b = randInt(3, 9), ans = randInt(5, 15); return { prompt: `${b * ans} \u00f7 ${b} = ?`, answer: ans }; }
+      if (ops === 3) { const n = randInt(5, 12) * 4; return { prompt: `${n} \u00f7 4 + ${n} \u00f7 2 = ?`, answer: n / 4 + n / 2 }; }
+      if (ops === 4) { const a = randInt(25, 65), b = randInt(15, 40); return { prompt: `${a} + ${b} = ?`, answer: a + b }; }
+      if (ops === 5) { const layers = randInt(4, 9), blocks = randInt(6, 15); return { prompt: `Pyramid blocks: ${layers} \u00d7 ${blocks} = ?`, answer: layers * blocks }; }
+      { const sacks = randInt(30, 80), removed = randInt(12, 25); return { prompt: `Grain sacks: ${sacks} \u2212 ${removed} = ?`, answer: sacks - removed }; }
+    }
+    case 3: {
+      const ops = randInt(0, 7);
+      if (ops === 0) { const a = randInt(8, 18), b = randInt(5, 13); return { prompt: `${a} \u00d7 ${b} = ?`, answer: a * b }; }
+      if (ops === 1) { const a = randInt(35, 75), b = randInt(18, 45); return { prompt: `${a} + ${b} = ?`, answer: a + b }; }
+      if (ops === 2) { const b = randInt(4, 12), ans = randInt(6, 18); return { prompt: `${b * ans} \u00f7 ${b} = ?`, answer: ans }; }
+      if (ops === 3) { const x = randInt(10, 30) * 2; return { prompt: `${x} + ${x} \u00f7 2 = ?`, answer: x + x / 2 }; }
+      if (ops === 4) { const a = randInt(11, 25); return { prompt: `${a} \u2192 ${a * 2} \u2192 ${a * 4} \u2192 ?`, answer: a * 8 }; }
+      if (ops === 5) { const cubits = randInt(5, 15); return { prompt: `${cubits} \u00d7 7 = ?`, answer: cubits * 7 }; }
+      if (ops === 6) { const fields = randInt(6, 14), area = randInt(5, 12); return { prompt: `Fields of barley: ${fields} \u00d7 ${area} = ?`, answer: fields * area }; }
+      { const depth = randInt(8, 18), days = randInt(3, 9); return { prompt: `Flood depth: ${depth} \u00d7 ${days} = ?`, answer: depth * days }; }
+    }
+    default: {
+      const ops = randInt(0, 8);
+      if (ops === 0) { const b = randInt(6, 15), ans = randInt(8, 20); return { prompt: `${b * ans} \u00f7 ${b} = ?`, answer: ans }; }
+      if (ops === 1) { const a = randInt(11, 19); return { prompt: `${a}\u00b2 = ?`, answer: a * a }; }
+      if (ops === 2) { const a = randInt(12, 25), b = randInt(6, 15), c = randInt(10, 30); return { prompt: `${a} \u00d7 ${b} + ${c} = ?`, answer: a * b + c }; }
+      if (ops === 3) { const a = randInt(50, 99), b = randInt(15, 45); return { prompt: `${a} \u2212 ${b} = ?`, answer: a - b }; }
+      if (ops === 4) { const x = randInt(12, 30) * 3; return { prompt: `${x} + ${x} \u00f7 3 = ?`, answer: x + x / 3 }; }
+      if (ops === 5) { const base = randInt(11, 20); return { prompt: `\u221a${base * base} = ?`, answer: base }; }
+      if (ops === 6) {
+        const triples: [number, number, number][] = [[3, 4, 5], [5, 12, 13], [8, 15, 17], [7, 24, 25]];
+        const t = triples[randInt(0, triples.length - 1)];
+        const hide = randInt(0, 2);
+        if (hide === 0) return { prompt: `?\u00b2 + ${t[1]}\u00b2 = ${t[2]}\u00b2  \u2192  ? =`, answer: t[0] };
+        if (hide === 1) return { prompt: `${t[0]}\u00b2 + ?\u00b2 = ${t[2]}\u00b2  \u2192  ? =`, answer: t[1] };
+        return { prompt: `${t[0]}\u00b2 + ${t[1]}\u00b2 = ?`, answer: t[2] * t[2] };
+      }
+      if (ops === 7) { const teams = randInt(8, 15), workers = randInt(10, 20), extra = randInt(10, 30); return { prompt: `Workers: ${teams} \u00d7 ${workers} + ${extra} = ?`, answer: teams * workers + extra }; }
+      { const base = randInt(11, 18); return { prompt: `Stone blocks: ${base}\u00b2 = ?`, answer: base * base }; }
     }
   }
-  g.strokeStyle = 'rgba(201, 168, 76, 0.55)';
-  g.lineWidth = 2;
-  g.strokeRect(1, 1, w - 2, h - 2);
-  const tex = new CanvasTexture(c);
-  tex.minFilter = LinearFilter;
-  return tex;
 }
 
-/* ---------------------------- Math-trap content --------------------------- */
-
-interface Trap {
-  prompt: string;
-  answer: number;
-  kind: 'math' | 'trivia';
+function generateHistoricalTrap(): Trap {
+  const qs: [string, number][] = [
+    ['How many squares on a Senet board?', 30],
+    ['How many pieces per side in classic Senet?', 5],
+    ['How many rows on a Senet board?', 3],
+    ['Squares per row on a Senet board?', 10],
+    ['How many throwing sticks in Senet?', 4],
+    ['House of Rebirth is square number...', 15],
+    ['How many players in Senet?', 2],
+    ['Egyptian doubling: 7 \u2192 14 \u2192 ?', 28],
+    ['Rope stretcher triangle: 3-4-?', 5],
+    ['How many faces on a pyramid (including base)?', 5],
+    ['Eye of Horus fractions sum to 63/64. Denominator of the smallest?', 7],
+    ['How many palms in a Royal Cubit?', 7],
+    ['Days in an Egyptian month?', 30],
+    ['Seasons in the Egyptian calendar?', 3],
+    ['Fingers in 1 palm?', 4],
+    ['How many Great Pyramids at Giza?', 3],
+    ['Base of the Egyptian number system?', 10],
+    ['Triangular faces on a pyramid?', 4],
+    ['Epagomenal days in the Egyptian year?', 5],
+    ['Months in Akhet (flood season)?', 4],
+    ['Organs stored in canopic jars?', 4],
+    ['Major kingdoms in Egyptian history?', 3],
+  ];
+  const pick = qs[randInt(0, qs.length - 1)];
+  return { prompt: pick[0], answer: pick[1] };
 }
 
-function generateTrap(): Trap {
-  // ~30% trivia, else math like the app's level-2 pool.
-  if (Math.random() < 0.3) {
-    const trivia: Trap[] = [
-      { prompt: 'How many squares on the Senet board?', answer: 30, kind: 'trivia' },
-      { prompt: 'Rolling how many marked sticks ends the turn? (2 or __)', answer: 3, kind: 'trivia' },
-      { prompt: 'House of Water is square number…', answer: 27, kind: 'trivia' },
-      { prompt: 'Djoser\u2019s step pyramid has how many tiers?', answer: 6, kind: 'trivia' },
-      { prompt: 'Days in an Egyptian decan (one star week)?', answer: 10, kind: 'trivia' },
-      { prompt: 'Cardinal directions the pyramids are aligned to?', answer: 4, kind: 'trivia' },
-    ];
-    return trivia[Math.floor(Math.random() * trivia.length)];
-  }
-  const choice = Math.floor(Math.random() * 5);
-  if (choice === 0) {
-    const a = randInt(6, 15);
-    const b = randInt(4, 12);
-    return { prompt: `${a} × ${b} = ?`, answer: a * b, kind: 'math' };
-  }
-  if (choice === 1) {
-    const a = randInt(3, 9);
-    return { prompt: `${a} → ${a * 2} → ?  (double)`, answer: a * 4, kind: 'math' };
-  }
-  if (choice === 2) {
-    const b = randInt(3, 8);
-    const ans = randInt(4, 11);
-    return { prompt: `(${b * ans}) ÷ ${b} = ?`, answer: ans, kind: 'math' };
-  }
-  if (choice === 3) {
-    const n = randInt(3, 9) * 4;
-    return { prompt: `${n} ÷ 4 + ${n} ÷ 2 = ?`, answer: n / 4 + n / 2, kind: 'math' };
-  }
-  const a = randInt(25, 65);
-  const b = randInt(15, 40);
-  return { prompt: `${a} + ${b} = ?`, answer: a + b, kind: 'math' };
-}
+/* ── Types ────────────────────────────────────────────────────── */
 
-/* ----------------------------- The puzzle class --------------------------- */
+type Phase =
+  | 'ready'
+  | 'threw'
+  | 'no-moves'
+  | 'moving'
+  | 'math-trap'
+  | 'opponent-think'
+  | 'won'
+  | 'lost';
+
+/* ── Puzzle class ─────────────────────────────────────────────── */
 
 export class SenetPuzzle extends Puzzle {
-  readonly title = 'SENET · Throw Sticks';
-  readonly subtitle = 'reach the afterlife before the gods';
+  readonly title = 'SENET';
+  readonly subtitle = 'the game of passing';
   readonly instructions =
-    'Throw the sticks, then click one of your Ankh pieces. Math-trap squares (7, 14, 21) summon Thoth — answer correctly to hold your ground. Both Ankh pieces past square 30 wins.';
+    'Throw the sticks, then tap one of your Ankh pieces to move. Math-trap squares summon Thoth \u2014 answer correctly within 10s to hold your ground. Guide all your Ankhs past square 30 before your turns run out.';
 
-  private pieces: Piece[] = [];
-  private turn: Side = 'player';
-  private phase: Phase = 'idle';
-  private roll = -1;
-  private lastRollExtra = false;
-  private aiTimer = 0;
-  private exitedPlayer = 0;
-  private exitedOpponent = 0;
+  private level = 2;
+  private pieceCount = 3;
+  private maxTurns = 50;
+  private trapSquares = mathTrapSquares(2);
+
+  private playerPieces: number[] = [];
+  private opponentPieces: number[] = [];
+  private throwResult = 0;
+  private isPlayerTurn = true;
+  private phase: Phase = 'ready';
+  private stickStates = [false, false, false, false];
   private turnCount = 0;
+  private hasExtraTurn = false;
+  private validDestinations: Map<number, number> = new Map();
 
-  private sticks: {
-    mesh: Mesh;
-    up: boolean;
-    anim: boolean;
-    t: number;
-    dur: number;
-    startX: number;
-    startY: number;
-    startZ: number;
-    peakY: number;
-    endX: number;
-    endZ: number;
-    rotXStart: number;
-    rotXEnd: number;
-    rotZStart: number;
-    rotZEnd: number;
-  }[] = [];
+  // Math trap state
+  private trapActive = false;
+  private trapQuestion = '';
+  private trapAnswer = 0;
+  private trapInput = '';
+  private trapTimer = TRAP_TIME;
+  private trapPieceIndex = 0;
+  private trapPreviousPos = 0;
+  private trapTimerId = 0;
   private recentPrompts: string[] = [];
 
-  private highlightSquares = new Set<number>();
-  private highlightMeshes: Mesh[] = [];
-  private backwardSquares = new Set<number>();
-
-  private pendingTrap: { piece: Piece; targetSquare: number } | null = null;
-  private trap: Trap | null = null;
-  private trapRemaining = 0;
-  private trapInput = '';
-
+  // DOM
+  private root: HTMLDivElement | null = null;
+  private ctx2d: CanvasRenderingContext2D | null = null;
+  private hudEl: HTMLDivElement | null = null;
   private statusEl: HTMLDivElement | null = null;
-  private rollBtn: HTMLButtonElement | null = null;
-  private rulesEl: HTMLDivElement | null = null;
+  private sticksEl: HTMLDivElement | null = null;
+  private throwBtn: HTMLButtonElement | null = null;
+  private overlayEl: HTMLDivElement | null = null;
   private bannerEl: HTMLDivElement | null = null;
   private bannerTimer = 0;
-  private trapEl: HTMLDivElement | null = null;
-  private trapTimerEl: HTMLDivElement | null = null;
 
-  private stickTexMarked = makeStickTexture(true);
-  private stickTexDark = makeStickTexture(false);
-
-  onSolved?: (winner: Side) => void;
+  onSolved?: () => void;
 
   init(): void {
-    this.buildBoard();
-    this.buildPieces();
-    this.buildSticks();
-    this.buildDomControls();
-    this.updateStatus();
-    this.showBanner({
-      icon: '☥',
-      title: 'The Throw Sticks',
-      sub: 'Imhotep faces you — move 2 Ankhs to the afterlife.',
-      color: '#d4a843',
-      bg: '#2e2510',
-      hold: 3.2,
-    });
+    this.setupLevel();
+    this.buildBackdrop();
+    this.buildDom();
+    this.drawBoard();
+    this.placePawns(false);
+    this.refreshUI();
+    this.showBanner('\u2625', 'Senet \u2014 The Game of Passing',
+      `Guide ${this.pieceCount} Ankhs to the afterlife before ${this.maxTurns} turns.`, C_GOLD);
   }
 
-  private buildBoard(): void {
-    // Board slab
-    const base = new Mesh(
-      new BoxGeometry(BOARD_W + 1.0, 0.35, BOARD_D + 1.0),
-      new MeshStandardMaterial({ color: 0x2a1f14, roughness: 0.75, metalness: 0.12 }),
-    );
-    base.position.y = -0.18;
-    this.group.add(base);
+  private setupLevel(): void {
+    const lvl = Math.max(1, Math.min(this.level, 5));
+    this.pieceCount = PIECE_COUNTS[lvl - 1];
+    this.maxTurns = MAX_TURNS_BY_LEVEL[lvl - 1];
+    this.trapSquares = mathTrapSquares(lvl);
+    this.playerPieces = [];
+    this.opponentPieces = [];
+    for (let i = 0; i < this.pieceCount; i++) {
+      this.playerPieces.push(i * 2);
+      this.opponentPieces.push(i * 2 + 1);
+    }
+    this.turnCount = 0;
+    this.throwResult = 0;
+    this.hasExtraTurn = false;
+    this.isPlayerTurn = true;
+    this.phase = 'ready';
+    this.validDestinations.clear();
+  }
 
-    // Gold trim border
-    const border = new Mesh(
-      new BoxGeometry(BOARD_W + 0.95, 0.02, BOARD_D + 0.95),
+  /* ═══════════════════ 3D backdrop ═══════════════════════════════ */
+
+  private buildBackdrop(): void {
+    const ground = new Mesh(
+      new PlaneGeometry(40, 40),
+      new MeshStandardMaterial({ color: new Color(C_DEEP_BROWN), roughness: 0.65, metalness: 0.2, side: DoubleSide }),
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -2.4;
+    this.group.add(ground);
+
+    const ring = new Mesh(
+      new RingGeometry(3.0, 3.18, 12),
       new MeshStandardMaterial({
-        color: 0xc9a84c,
-        emissive: 0x3a2a10,
-        emissiveIntensity: 0.35,
-        metalness: 0.85,
-        roughness: 0.3,
+        color: new Color(C_GOLD), emissive: new Color('#402004'),
+        emissiveIntensity: 0.55, roughness: 0.45, metalness: 0.85, side: DoubleSide,
       }),
     );
-    border.position.y = 0.005;
-    this.group.add(border);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = -2.37;
+    this.group.add(ring);
 
-    for (let n = 1; n <= 30; n++) {
-      const { row, col } = pathToRC(n);
-      const x = -BOARD_W / 2 + (col + 0.5) * CELL;
-      const z = -BOARD_D / 2 + (row + 0.5) * CELL;
-      const tex = makeSquareTexture(n);
-      const cell = new Mesh(
-        new PlaneGeometry(CELL * 0.96, CELL * 0.96),
-        new MeshStandardMaterial({
-          map: tex,
-          roughness: 0.85,
-          side: DoubleSide,
-        }),
-      );
-      cell.rotation.x = -Math.PI / 2;
-      cell.position.set(x, 0.02, z);
-      cell.userData = { square: n };
-      this.group.add(cell);
-    }
+    const lamp = new PointLight('#fac675', 2.2, 24, 1.6);
+    lamp.position.set(0, 6, 4);
+    this.group.add(lamp);
   }
 
-  private buildPieces(): void {
-    const pedestalGeom = new CylinderGeometry(PIECE_R, PIECE_R * 1.04, PIECE_H, 28);
-    const faceGeom = new PlaneGeometry(PIECE_FACE, PIECE_FACE);
-    const playerTex = makePieceTexture('player');
-    const oppTex = makePieceTexture('opponent');
+  /* ═══════════════════ DOM construction ══════════════════════════ */
 
-    const mkPedestalMat = (side: Side) =>
-      new MeshStandardMaterial({
-        color: side === 'player' ? 0x8a6428 : 0x2a3a68,
-        emissive: side === 'player' ? 0x2c1804 : 0x0a1024,
-        emissiveIntensity: 0.5,
-        metalness: 0.7,
-        roughness: 0.35,
-      });
+  private buildDom(): void {
+    const root = document.createElement('div');
+    root.id = 'puzzle-senet';
+    Object.assign(root.style, {
+      position: 'fixed', inset: '0', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: '20', pointerEvents: 'none', fontFamily: "'Rajdhani', 'Segoe UI', system-ui, sans-serif",
+    });
+    this.root = root;
 
-    const starts: { side: Side; sq: number }[] = [
-      { side: 'player', sq: 1 },
-      { side: 'opponent', sq: 2 },
-      { side: 'player', sq: 3 },
-      { side: 'opponent', sq: 4 },
-    ];
-    for (const s of starts) {
-      const ped = new Mesh(pedestalGeom, mkPedestalMat(s.side));
-      const face = new Mesh(
-        faceGeom,
-        new MeshStandardMaterial({
-          map: s.side === 'player' ? playerTex : oppTex,
-          transparent: true,
-          roughness: 0.45,
-          metalness: 0.2,
-          emissive: s.side === 'player' ? 0x3a2b08 : 0x0a1838,
-          emissiveIntensity: 0.55,
-        }),
-      );
-      face.rotation.x = -Math.PI / 2;
-      face.position.y = PIECE_H / 2 + 0.005;
-      ped.add(face);
+    const panel = document.createElement('div');
+    Object.assign(panel.style, {
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px',
+      pointerEvents: 'auto', padding: '14px 18px',
+      background: 'rgba(26,15,10,0.92)', backdropFilter: 'blur(12px)',
+      border: '1px solid rgba(212,168,67,0.25)', borderTop: '3px solid ' + C_GOLD,
+      borderRadius: '10px', boxShadow: '0 18px 60px rgba(0,0,0,0.65)', color: C_CREAM,
+      maxHeight: '96vh', overflowY: 'auto',
+    });
+    root.appendChild(panel);
 
-      const piece: Piece = {
-        mesh: ped,
-        decal: face,
-        side: s.side,
-        square: s.sq,
-        preTrapSquare: s.sq,
-        anim: {
-          from: new Vector3(),
-          to: new Vector3(),
-          t: 0,
-          dur: 0,
-          active: false,
-          hop: 0,
-        },
-      };
-      ped.position.copy(squareWorld(s.sq));
-      ped.userData = { piece };
-      this.pieces.push(piece);
-      this.group.add(ped);
-    }
-  }
+    // Title
+    const title = document.createElement('div');
+    Object.assign(title.style, { fontSize: '15px', letterSpacing: '0.22em', color: C_GOLD, fontWeight: '700' });
+    title.textContent = 'SENET \u00b7 \ud80c\udc83\ud80c\udc96\ud80c\udcff';
+    panel.appendChild(title);
 
-  private buildSticks(): void {
-    // Stick oriented with its long axis along X (length 2.6). Marked/unmarked
-    // face toggles via rotation around X (the long axis). Rest positions are
-    // distributed along Z so the four sticks sit as parallel planks in the
-    // tray without overlapping.
-    const geom = new BoxGeometry(2.6, 0.22, 0.3);
-    const trayZBase = BOARD_D / 2 + 1.9;
-    const trayStride = 0.55; // >> stick Z thickness (0.3) → clear gaps
-    for (let i = 0; i < 4; i++) {
-      const mat = new MeshStandardMaterial({
-        map: this.stickTexMarked,
-        roughness: 0.55,
-        metalness: 0.15,
-        emissive: 0x2a1c08,
-        emissiveIntensity: 0.25,
-      });
-      const mesh = new Mesh(geom, mat);
-      const z = trayZBase + (i - 1.5) * trayStride;
-      mesh.position.set(0, 0.15, z);
-      mesh.userData = { stickIndex: i };
-      this.group.add(mesh);
-      this.sticks.push({
-        mesh,
-        up: true,
-        anim: false,
-        t: 0,
-        dur: STICK_DUR,
-        startX: 0,
-        startY: 0.15,
-        startZ: z,
-        peakY: 5.2,
-        endX: 0,
-        endZ: z,
-        rotXStart: 0,
-        rotXEnd: 0,
-        rotZStart: 0,
-        rotZEnd: 0,
-      });
-    }
-  }
+    // HUD row (score, turns)
+    this.hudEl = document.createElement('div');
+    Object.assign(this.hudEl.style, {
+      display: 'flex', gap: '14px', alignItems: 'center', justifyContent: 'center',
+      fontSize: '12px', letterSpacing: '0.1em', width: '100%',
+    });
+    panel.appendChild(this.hudEl);
 
-  /* -------------------------- DOM control & chrome -------------------------- */
-
-  private buildDomControls(): void {
-    const wrap = document.createElement('div');
-    wrap.id = 'puzzle-senet-root';
-    wrap.style.cssText =
-      'position:fixed;inset:0;pointer-events:none;z-index:25;font-family:system-ui,-apple-system,sans-serif;';
-
-    // Top status card + throw button
-    const top = document.createElement('div');
-    top.style.cssText =
-      'position:absolute;left:50%;top:24px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:10px;pointer-events:auto;';
-    const status = document.createElement('div');
-    status.style.cssText =
-      'padding:10px 22px;border:1px solid rgba(212,168,67,0.35);border-bottom:3px solid #d4a843;background:rgba(10,6,2,0.8);backdrop-filter:blur(10px);border-radius:6px;color:#fff;letter-spacing:0.05em;font-size:14px;text-align:center;min-width:360px;';
-    this.statusEl = status;
-    const btn = document.createElement('button');
-    btn.textContent = 'THROW STICKS';
-    btn.style.cssText =
-      'padding:12px 28px;border:1px solid #d4a843;background:linear-gradient(180deg,#3a2608,#1a1004);color:#d4a843;letter-spacing:0.18em;font-weight:600;cursor:pointer;border-radius:4px;font-size:14px;font-family:inherit;';
-    btn.addEventListener('click', () => this.throwSticks());
-    this.rollBtn = btn;
-    top.append(status, btn);
-
-    // Rules toggle (top-left)
-    const rulesBtn = document.createElement('button');
-    rulesBtn.textContent = 'ⓘ RULES';
-    rulesBtn.style.cssText =
-      'position:absolute;top:24px;left:24px;padding:8px 14px;border:1px solid rgba(212,168,67,0.4);background:rgba(10,6,2,0.7);color:#d4a843;letter-spacing:0.12em;font-weight:600;cursor:pointer;border-radius:4px;font-size:12px;pointer-events:auto;font-family:inherit;';
-    const rules = document.createElement('div');
-    rules.style.cssText =
-      'position:absolute;top:70px;left:24px;max-width:360px;max-height:70vh;overflow-y:auto;padding:16px 18px;border:1px solid rgba(212,168,67,0.35);background:rgba(14,8,3,0.92);backdrop-filter:blur(12px);color:#e6dcc2;border-radius:6px;font-size:12.5px;line-height:1.55;display:none;pointer-events:auto;';
-    rules.innerHTML = `
-      <div style="color:#d4a843;letter-spacing:0.18em;font-weight:700;font-size:12px;margin-bottom:8px">SENET · THE GAME OF PASSING</div>
-      <p>Senet (𓊃𓈖𓏏 — "passing") is one of humanity's oldest board games, carved into mastabas as early as 3100 BCE and buried alongside Tutankhamun. Egyptians believed the board mirrored the journey of the soul through the Duat to reach the afterlife.</p>
-      <div style="color:#d4a843;font-weight:600;margin-top:10px">The throw sticks</div>
-      <p>Four flat sticks are tossed. Count the <b>light (marked) sides</b>. 1 marked = roll 1, 2 = roll 2, 3 = roll 3, 4 = roll 4, and <b>all dark</b> = roll 5. Rolling <b>1, 4, or 5</b> grants an <b>extra turn</b>.</p>
-      <div style="color:#d4a843;font-weight:600;margin-top:10px">Moving</div>
-      <p>Click one of your Ankh pieces to advance by the roll. You may only move <b>backward</b> when no forward move exists. You cannot land on your own piece. Land on a lone enemy to <b>capture</b> it — the pieces swap. A piece with an <b>adjacent friend</b> is protected.</p>
-      <div style="color:#d4a843;font-weight:600;margin-top:10px">Sacred squares</div>
-      <p>
-        <span style="color:#44b87a">☥ 15 Rebirth</span> · safe haven after drowning.<br>
-        <span style="color:#d4a843">✦ 26 Beauty</span> · safe + extra turn.<br>
-        <span style="color:#4a90d9">〰 27 Water</span> · drown, back to 15.<br>
-        <span style="color:#e8a030">III 28 Three Truths</span> · judgment.<br>
-        <span style="color:#e8a030">II 29 Re-Atoum</span> · eternal return.<br>
-        <span style="color:#d4a843">☀ 30 Departure</span> · exact roll to exit.
-      </p>
-      <div style="color:#7b2d8e;font-weight:600;margin-top:10px">Thoth's traps</div>
-      <p>Squares <b>7, 14, 21</b> are Thoth's arithmetic gates. Landing there opens a math trap with a 10-second timer. Answer correctly to hold the square; fail and your piece snaps back to where it came from, ending your turn.</p>
-      <div style="color:#d4a843;font-weight:600;margin-top:10px">Victory</div>
-      <p>Shepherd both Ankhs past square 30. The first soul to complete the journey wins the day.</p>
-    `;
-    this.rulesEl = rules;
-    rulesBtn.addEventListener('click', () => {
-      rules.style.display = rules.style.display === 'none' ? 'block' : 'none';
+    // Board wrapper
+    const boardWrap = document.createElement('div');
+    Object.assign(boardWrap.style, {
+      position: 'relative', width: BOARD_W + 'px', height: BOARD_H + 'px',
+      borderRadius: '6px', overflow: 'hidden',
+      border: '2px solid rgba(212,168,67,0.35)',
     });
 
-    // Banner overlay (centered, hidden until used)
-    const banner = document.createElement('div');
-    banner.style.cssText =
-      'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(0.9);opacity:0;transition:opacity 260ms ease,transform 320ms cubic-bezier(0.2,0.9,0.3,1.2);pointer-events:none;';
-    this.bannerEl = banner;
+    const cvs = document.createElement('canvas');
+    cvs.width = BOARD_W * 2;
+    cvs.height = BOARD_H * 2;
+    Object.assign(cvs.style, { width: BOARD_W + 'px', height: BOARD_H + 'px', display: 'block' });
+    this.ctx2d = cvs.getContext('2d')!;
+    boardWrap.appendChild(cvs);
 
-    // Trap modal (hidden)
-    const trap = document.createElement('div');
-    trap.style.cssText =
-      'position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:radial-gradient(ellipse at center,rgba(30,15,46,0.6),rgba(0,0,0,0.82));pointer-events:auto;';
-    this.trapEl = trap;
+    // Click handler on canvas
+    cvs.addEventListener('click', (e) => this.handleBoardClick(e));
 
-    wrap.append(top, rulesBtn, rules, banner, trap);
-    document.body.appendChild(wrap);
+    panel.appendChild(boardWrap);
+
+    // Sticks display + throw button
+    this.sticksEl = document.createElement('div');
+    Object.assign(this.sticksEl.style, {
+      display: 'flex', gap: '10px', alignItems: 'center', justifyContent: 'center', minHeight: '44px',
+    });
+    panel.appendChild(this.sticksEl);
+
+    const throwBtn = document.createElement('button');
+    throwBtn.type = 'button';
+    throwBtn.textContent = 'THROW STICKS';
+    Object.assign(throwBtn.style, {
+      padding: '10px 26px', border: '1px solid ' + C_GOLD,
+      background: `linear-gradient(180deg, ${C_GOLD_LIGHT}, ${C_GOLD})`,
+      color: C_DEEP_BROWN, letterSpacing: '0.16em', fontWeight: '700',
+      cursor: 'pointer', borderRadius: '20px', fontSize: '14px', fontFamily: 'inherit',
+      boxShadow: `0 4px 14px rgba(212,168,67,0.4)`,
+    });
+    throwBtn.addEventListener('click', () => this.throwSticks());
+    this.throwBtn = throwBtn;
+    panel.appendChild(throwBtn);
+
+    // Status
+    this.statusEl = document.createElement('div');
+    Object.assign(this.statusEl.style, {
+      fontSize: '13px', letterSpacing: '0.06em', textAlign: 'center', minHeight: '18px', color: C_SAND,
+    });
+    panel.appendChild(this.statusEl);
+
+    // Reset button (hidden until lost)
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.textContent = 'TRY AGAIN';
+    resetBtn.id = 'senet-reset-btn';
+    Object.assign(resetBtn.style, {
+      padding: '8px 18px', display: 'none',
+      background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.25)',
+      color: C_CREAM, fontFamily: 'inherit', fontSize: '11px', letterSpacing: '0.22em',
+      fontWeight: '600', borderRadius: '5px', cursor: 'pointer',
+    });
+    resetBtn.addEventListener('click', () => this.resetGame());
+    panel.appendChild(resetBtn);
+
+    // Banner overlay
+    this.bannerEl = document.createElement('div');
+    Object.assign(this.bannerEl.style, {
+      position: 'absolute', left: '50%', top: '50%',
+      transform: 'translate(-50%,-50%) scale(0.9)', opacity: '0',
+      transition: 'opacity 260ms ease, transform 320ms cubic-bezier(0.2,0.9,0.3,1.2)',
+      pointerEvents: 'none', zIndex: '30',
+    });
+    root.appendChild(this.bannerEl);
+
+    // Overlay for math trap
+    this.overlayEl = document.createElement('div');
+    Object.assign(this.overlayEl.style, {
+      position: 'fixed', inset: '0', zIndex: '25', display: 'none',
+      alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(0,0,0,0.6)', pointerEvents: 'auto',
+    });
+    root.appendChild(this.overlayEl);
+
+    // Inject animation keyframe
+    if (!document.getElementById('senet-anims')) {
+      const style = document.createElement('style');
+      style.id = 'senet-anims';
+      style.textContent = `@keyframes senet-pop { from { transform: scale(0.92); opacity:0; } to { transform: scale(1); opacity:1; } }`;
+      document.head.appendChild(style);
+    }
+
+    document.body.appendChild(root);
   }
 
-  private updateStatus(): void {
-    if (!this.statusEl) return;
-    const whose =
-      this.phase === 'won'
-        ? 'VICTORY'
-        : this.phase === 'lost'
-          ? 'THE GODS PREVAIL'
-          : this.turn === 'player'
-            ? 'YOUR TURN'
-            : "GODS' TURN";
-    const rollLine =
-      this.phase === 'trap'
-        ? 'THOTH TESTS YOU…'
-        : this.roll < 0
-          ? 'throw the sticks'
-          : `rolled ${this.roll}${this.lastRollExtra ? ' · extra turn' : ''}${this.roll === 0 ? ' — pass' : ''}`;
-    const score = `Ankh ${this.exitedPlayer}/2 · Eye ${this.exitedOpponent}/2`;
-    this.statusEl.innerHTML = `<div style="color:#d4a843;font-weight:700;letter-spacing:0.14em">${whose}</div><div style="opacity:0.82;margin-top:3px">${rollLine}</div><div style="font-size:11px;opacity:0.6;margin-top:6px;letter-spacing:0.08em">${score}</div>`;
-    if (this.rollBtn) {
-      const canRoll =
-        this.phase === 'idle' && this.turn === 'player' && this.roll < 0;
-      this.rollBtn.disabled = !canRoll;
-      this.rollBtn.style.opacity = canRoll ? '1' : '0.4';
-      this.rollBtn.style.pointerEvents = canRoll ? 'auto' : 'none';
+  /* ═══════════════════ Canvas board drawing ══════════════════════ */
+
+  private drawBoard(): void {
+    const c = this.ctx2d!;
+    const s = 2;
+    c.clearRect(0, 0, BOARD_W * s, BOARD_H * s);
+    c.save();
+    c.scale(s, s);
+
+    for (let pos = 0; pos < 30; pos++) {
+      const { row, col } = posToRowCol(pos);
+      const x = col * CELL_PX;
+      const y = row * CELL_PX;
+      const special = SPECIAL[pos];
+      const isTrap = this.trapSquares.has(pos);
+      const isAlt = (row + col) % 2 === 0;
+
+      // Background fill
+      let fill: string;
+      if (special) fill = special.bg;
+      else if (isTrap) fill = '#1E0F2E';
+      else fill = isAlt ? C_CELL_ALT : C_CELL_DARK;
+      c.fillStyle = fill;
+      c.fillRect(x, y, CELL_PX, CELL_PX);
+
+      // Border
+      c.strokeStyle = special ? special.color + 'aa' : isTrap ? C_THOTH_PURPLE + '99' : 'rgba(255,195,90,0.1)';
+      c.lineWidth = special ? 1.5 : 0.5;
+      c.strokeRect(x, y, CELL_PX, CELL_PX);
+
+      // Corner glyphs
+      c.fillStyle = 'rgba(201,168,76,0.25)';
+      const d = 4;
+      c.fillRect(x + 2, y + 2, d, 1);
+      c.fillRect(x + 2, y + 2, 1, d);
+      c.fillRect(x + CELL_PX - 2 - d, y + 2, d, 1);
+      c.fillRect(x + CELL_PX - 3, y + 2, 1, d);
+
+      // Special icon
+      if (special) {
+        c.fillStyle = special.color;
+        c.font = special.icon.length > 1 ? 'bold 10px serif' : 'bold 16px serif';
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        c.fillText(special.icon, x + CELL_PX / 2, y + CELL_PX / 2 - 2);
+        c.font = '600 7px Rajdhani, system-ui';
+        c.fillText(String(pos + 1), x + CELL_PX / 2, y + CELL_PX - 5);
+      } else if (isTrap) {
+        // Thoth ibis
+        this.drawThothIbis(c, x + CELL_PX / 2, y + CELL_PX / 2 - 2, CELL_PX * 0.28);
+        c.fillStyle = C_THOTH_PURPLE + 'aa';
+        c.font = '600 7px Rajdhani, system-ui';
+        c.textAlign = 'center';
+        c.fillText(String(pos + 1), x + CELL_PX / 2, y + CELL_PX - 5);
+      } else {
+        // Cell number
+        c.fillStyle = 'rgba(245,230,204,0.22)';
+        c.font = '600 8px Rajdhani, system-ui';
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        c.fillText(String(pos + 1), x + CELL_PX / 2, y + CELL_PX / 2);
+      }
+    }
+
+    // Draw pieces
+    this.drawPieces(c);
+
+    c.restore();
+  }
+
+  private drawPieces(c: CanvasRenderingContext2D): void {
+    // Draw opponent pieces (Eye of Horus)
+    for (const pos of this.opponentPieces) {
+      if (pos >= OFF_BOARD) continue;
+      const { x, y } = cellCenter(pos);
+      this.drawEyePiece(c, x, y, CELL_PX * 0.32);
+    }
+    // Draw player pieces (Ankh)
+    for (let i = 0; i < this.playerPieces.length; i++) {
+      const pos = this.playerPieces[i];
+      if (pos >= OFF_BOARD) continue;
+      const { x, y } = cellCenter(pos);
+      const canSelect = this.phase === 'threw' && this.validDestinations.has(i);
+      this.drawAnkhPiece(c, x, y, CELL_PX * 0.32, canSelect);
+    }
+    // Draw valid destination markers
+    if (this.phase === 'threw') {
+      for (const [, dest] of this.validDestinations) {
+        if (dest >= OFF_BOARD) continue;
+        const { x, y } = cellCenter(dest);
+        const { row, col } = posToRowCol(dest);
+        const sx = col * CELL_PX, sy = row * CELL_PX;
+        c.strokeStyle = C_GOLD;
+        c.lineWidth = 1.5;
+        c.strokeRect(sx + 1, sy + 1, CELL_PX - 2, CELL_PX - 2);
+        c.fillStyle = C_GOLD + '33';
+        c.fillRect(sx, sy, CELL_PX, CELL_PX);
+        // Small dot if empty
+        const hasOpponent = this.opponentPieces.includes(dest);
+        const hasPlayer = this.playerPieces.includes(dest);
+        if (!hasOpponent && !hasPlayer) {
+          c.beginPath();
+          c.arc(x, y, 3, 0, Math.PI * 2);
+          c.fillStyle = C_GOLD + '88';
+          c.fill();
+        }
+      }
     }
   }
 
-  /* ------------------------------- Banners ---------------------------------- */
+  private drawAnkhPiece(c: CanvasRenderingContext2D, cx: number, cy: number, r: number, highlight: boolean): void {
+    c.save();
+    c.strokeStyle = C_PLAYER;
+    c.fillStyle = C_PLAYER;
+    c.lineWidth = Math.max(1.5, r * 0.18);
+    c.lineCap = 'round';
+    c.lineJoin = 'round';
+    // Loop
+    c.beginPath();
+    c.ellipse(cx, cy - r * 0.5, r * 0.4, r * 0.45, 0, 0, Math.PI * 2);
+    c.stroke();
+    // Shaft
+    c.beginPath();
+    c.moveTo(cx, cy - r * 0.05);
+    c.lineTo(cx, cy + r * 0.85);
+    c.stroke();
+    // Crossbar
+    c.beginPath();
+    c.moveTo(cx - r * 0.55, cy + r * 0.1);
+    c.lineTo(cx + r * 0.55, cy + r * 0.1);
+    c.stroke();
+    // Highlight glow
+    if (highlight) {
+      c.shadowColor = C_GOLD_LIGHT;
+      c.shadowBlur = 8;
+      c.beginPath();
+      c.arc(cx, cy, r * 0.6, 0, Math.PI * 2);
+      c.strokeStyle = C_GOLD + '55';
+      c.lineWidth = 1;
+      c.stroke();
+    }
+    c.restore();
+  }
 
-  private showBanner(opts: {
-    icon: string;
-    title: string;
-    sub?: string;
-    color: string;
-    bg: string;
-    hold?: number;
-  }): void {
+  private drawEyePiece(c: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
+    c.save();
+    // Almond
+    c.beginPath();
+    c.moveTo(cx - r, cy);
+    c.quadraticCurveTo(cx, cy - r * 0.8, cx + r, cy);
+    c.quadraticCurveTo(cx, cy + r * 0.8, cx - r, cy);
+    c.closePath();
+    c.fillStyle = C_OPPONENT;
+    c.fill();
+    c.strokeStyle = C_OPPONENT_STROKE;
+    c.lineWidth = Math.max(1, r * 0.1);
+    c.stroke();
+    // Iris
+    c.fillStyle = '#8AA8E0';
+    c.beginPath();
+    c.arc(cx, cy, r * 0.35, 0, Math.PI * 2);
+    c.fill();
+    // Pupil
+    c.fillStyle = C_OPPONENT_PUPIL;
+    c.beginPath();
+    c.arc(cx, cy, r * 0.18, 0, Math.PI * 2);
+    c.fill();
+    c.restore();
+  }
+
+  private drawThothIbis(c: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
+    c.save();
+    c.strokeStyle = C_THOTH_PURPLE + 'cc';
+    c.lineWidth = Math.max(1, r * 0.1);
+    c.lineCap = 'round';
+    c.beginPath();
+    c.ellipse(cx, cy - r * 0.1, r * 0.4, r * 0.45, 0, 0, Math.PI * 2);
+    c.stroke();
+    // Beak
+    c.beginPath();
+    c.moveTo(cx + r * 0.3, cy);
+    c.quadraticCurveTo(cx + r * 0.8, cy + r * 0.2, cx + r * 0.4, cy + r * 0.6);
+    c.stroke();
+    // Eye
+    c.fillStyle = C_THOTH_PURPLE + 'dd';
+    c.beginPath();
+    c.arc(cx - r * 0.12, cy - r * 0.18, r * 0.07, 0, Math.PI * 2);
+    c.fill();
+    c.restore();
+  }
+
+  /* ═══════════════════ Pawn placement (redraw board) ════════════ */
+
+  private placePawns(_animate: boolean): void {
+    this.drawBoard();
+  }
+
+  /* ═══════════════════ UI refresh ════════════════════════════════ */
+
+  private refreshUI(): void {
+    const playerOff = this.playerPieces.filter(p => p >= OFF_BOARD).length;
+    const opponentOff = this.opponentPieces.filter(p => p >= OFF_BOARD).length;
+    const turnsLeft = this.maxTurns - this.turnCount;
+
+    if (this.hudEl) {
+      this.hudEl.innerHTML = '';
+      // Player score
+      const ps = document.createElement('span');
+      ps.style.color = C_GOLD;
+      ps.textContent = `\u2625 ${playerOff}/${this.pieceCount}`;
+      // Turns
+      const ts = document.createElement('span');
+      ts.style.color = turnsLeft <= 10 ? C_DANGER_RED : C_SAND + 'aa';
+      ts.textContent = `TURN ${this.turnCount}/${this.maxTurns}`;
+      // Opponent score
+      const os = document.createElement('span');
+      os.style.color = C_WATER_BLUE;
+      os.textContent = `${opponentOff}/${this.pieceCount} \ud80c\udc39`;
+      this.hudEl.append(ps, ts, os);
+    }
+
+    // Sticks display
+    if (this.sticksEl) {
+      this.sticksEl.innerHTML = '';
+      for (let i = 0; i < 4; i++) {
+        const stick = document.createElement('div');
+        const marked = this.stickStates[i];
+        Object.assign(stick.style, {
+          width: '12px', height: '36px', borderRadius: '3px',
+          background: marked
+            ? `linear-gradient(180deg, ${C_GOLD_LIGHT}, ${C_GOLD})`
+            : `linear-gradient(180deg, ${C_DEEP_BROWN}, #1A0F08)`,
+          border: `1px solid ${C_GOLD}88`,
+        });
+        this.sticksEl.appendChild(stick);
+      }
+      if (this.throwResult > 0) {
+        const label = document.createElement('span');
+        label.style.color = C_GOLD;
+        label.style.fontWeight = '700';
+        label.style.fontSize = '16px';
+        label.style.fontVariantNumeric = 'tabular-nums';
+        label.textContent = `= ${this.throwResult}`;
+        if (this.hasExtraTurn) label.textContent += ' \u27f3';
+        this.sticksEl.appendChild(label);
+      }
+    }
+
+    // Throw button
+    if (this.throwBtn) {
+      const canThrow = this.phase === 'ready' && this.isPlayerTurn;
+      this.throwBtn.style.display = canThrow ? 'inline-block' : 'none';
+    }
+
+    // Reset button
+    const resetBtn = document.getElementById('senet-reset-btn') as HTMLButtonElement | null;
+    if (resetBtn) resetBtn.style.display = this.phase === 'lost' ? 'inline-block' : 'none';
+
+    this.drawBoard();
+  }
+
+  private showStatus(msg: string, color?: string): void {
+    if (!this.statusEl) return;
+    this.statusEl.textContent = msg;
+    this.statusEl.style.color = color ?? C_SAND;
+  }
+
+  /* ═══════════════════ Banner ════════════════════════════════════ */
+
+  private showBanner(icon: string, title: string, desc: string, color: string, hold = 2.8): void {
     if (!this.bannerEl) return;
-    const hold = opts.hold ?? BANNER_TIME;
     this.bannerTimer = hold;
     this.bannerEl.innerHTML = `
-      <div style="position:relative;min-width:360px;max-width:520px;padding:22px 34px;background:linear-gradient(180deg,${opts.bg},#0b0603);border:1px solid ${opts.color}99;border-radius:8px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,0.6),0 0 0 1px ${opts.color}33 inset;">
-        <div style="position:absolute;top:6px;left:6px;width:10px;height:10px;border-left:2px solid ${opts.color};border-top:2px solid ${opts.color};opacity:0.65"></div>
-        <div style="position:absolute;top:6px;right:6px;width:10px;height:10px;border-right:2px solid ${opts.color};border-top:2px solid ${opts.color};opacity:0.65"></div>
-        <div style="position:absolute;bottom:6px;left:6px;width:10px;height:10px;border-left:2px solid ${opts.color};border-bottom:2px solid ${opts.color};opacity:0.65"></div>
-        <div style="position:absolute;bottom:6px;right:6px;width:10px;height:10px;border-right:2px solid ${opts.color};border-bottom:2px solid ${opts.color};opacity:0.65"></div>
-        <div style="font-size:46px;line-height:1;color:${opts.color};text-shadow:0 0 18px ${opts.color}88">${opts.icon}</div>
-        <div style="font-size:17px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:${opts.color};margin-top:10px">${opts.title}</div>
-        ${opts.sub ? `<div style="font-size:12.5px;color:rgba(255,255,255,0.78);margin-top:6px;letter-spacing:0.04em">${opts.sub}</div>` : ''}
+      <div style="position:relative;min-width:300px;max-width:400px;padding:18px 28px;background:linear-gradient(180deg,#1E1610,#2A1F14,#1E1610);border:1.5px solid ${color}88;border-radius:10px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,0.6);">
+        <div style="position:absolute;top:6px;left:6px;width:8px;height:8px;border-left:1.5px solid ${color};border-top:1.5px solid ${color};opacity:0.5"></div>
+        <div style="position:absolute;top:6px;right:6px;width:8px;height:8px;border-right:1.5px solid ${color};border-top:1.5px solid ${color};opacity:0.5"></div>
+        <div style="position:absolute;bottom:6px;left:6px;width:8px;height:8px;border-left:1.5px solid ${color};border-bottom:1.5px solid ${color};opacity:0.5"></div>
+        <div style="position:absolute;bottom:6px;right:6px;width:8px;height:8px;border-right:1.5px solid ${color};border-bottom:1.5px solid ${color};opacity:0.5"></div>
+        <div style="font-size:28px;line-height:1;color:${color}">${icon}</div>
+        <div style="font-size:15px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:${color};margin-top:8px">${title}</div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.72);margin-top:5px;letter-spacing:0.04em">${desc}</div>
       </div>`;
     this.bannerEl.style.opacity = '1';
     this.bannerEl.style.transform = 'translate(-50%,-50%) scale(1)';
@@ -764,682 +739,621 @@ export class SenetPuzzle extends Puzzle {
     }
   }
 
-  /* --------------------------- Stick throw flow ----------------------------- */
+  /* ═══════════════════ Throw sticks ═════════════════════════════ */
+
+  /** Roll fairly: 4 random booleans, count marked, 0 marked = 5. */
+  private rollFair(): { marked: boolean[]; result: number } {
+    const m = Array.from({ length: 4 }, () => Math.random() < 0.5);
+    const c = m.filter(v => v).length;
+    return { marked: m, result: c === 0 ? 5 : c };
+  }
+
+  /** Smart player roll: best of 2 (iOS mechanic). */
+  private rollSmartPlayer(): { marked: boolean[]; result: number } {
+    const r1 = this.rollFair();
+    const r2 = this.rollFair();
+    const m1 = this.computeValidMoves(this.playerPieces, this.opponentPieces, r1.result);
+    const m2 = this.computeValidMoves(this.playerPieces, this.opponentPieces, r2.result);
+    if (m1.size === 0 && m2.size > 0) return r2;
+    if (m1.size > 0 && m2.size === 0) return r1;
+    return r1.result >= r2.result ? r1 : r2;
+  }
+
+  /** Disadvantage AI roll: worst of 2 (iOS mechanic). */
+  private rollDisadvantage(): { marked: boolean[]; result: number } {
+    const r1 = this.rollFair();
+    const r2 = this.rollFair();
+    return r1.result <= r2.result ? r1 : r2;
+  }
 
   private throwSticks(): void {
-    if (this.phase !== 'idle' || this.turn !== 'player' || this.roll >= 0) return;
-    this.phase = 'rolling';
-    this.animateSticks(true);
-  }
+    if (this.phase !== 'ready' || !this.isPlayerTurn) return;
 
-  private animateSticks(forPlayer: boolean): void {
-    const outcomes: boolean[] = [];
-    for (let i = 0; i < 4; i++) outcomes.push(Math.random() < 0.5);
-    const marked = outcomes.filter((v) => v).length;
-    const roll = marked === 0 ? 5 : marked;
-    this.roll = roll;
-    this.lastRollExtra = roll === 1 || roll === 4 || roll === 5;
-
-    // Toss physics: each stick flies up in a parabola, tumbles on X+Z, lands
-    // spread across the board's front edge. Different durations per stick so
-    // the landings feel staggered and chaotic.
-    const landZBase = BOARD_D / 2 + 1.9;
-    const trayStride = 0.55;
-    for (let i = 0; i < 4; i++) {
-      const s = this.sticks[i];
-      const finalUp = outcomes[i];
-      s.anim = true;
-      s.t = 0;
-      s.dur = STICK_DUR + i * 0.08 + Math.random() * 0.12;
-      s.startX = s.mesh.position.x;
-      s.startY = s.mesh.position.y;
-      s.startZ = s.mesh.position.z;
-      s.peakY = 4.8 + Math.random() * 1.4;
-      // Land in a loose fan, but each stick keeps its own Z slot so they don't
-      // stack on top of one another once they settle.
-      s.endX = (Math.random() - 0.5) * 1.4;
-      s.endZ = landZBase + (i - 1.5) * trayStride + (Math.random() - 0.5) * 0.25;
-      s.rotXStart = s.mesh.rotation.x;
-      s.rotZStart = s.mesh.rotation.z;
-      // Several flips (x) + some tumble (z), settling to the marked/unmarked face.
-      const flipsX = 6 + Math.floor(Math.random() * 4);
-      const tumbleZ = 1 + Math.floor(Math.random() * 3);
-      const finalAngleX = finalUp ? 0 : Math.PI;
-      s.rotXEnd = finalAngleX + Math.PI * 2 * flipsX * (Math.random() < 0.5 ? 1 : -1);
-      s.rotZEnd = (Math.random() - 0.5) * 0.4 + Math.PI * 2 * tumbleZ * (Math.random() < 0.5 ? 1 : -1);
-      s.up = finalUp;
-      (s.mesh.material as MeshStandardMaterial).map = finalUp
-        ? this.stickTexMarked
-        : this.stickTexDark;
-      (s.mesh.material as MeshStandardMaterial).needsUpdate = true;
-    }
-    const maxDur = Math.max(...this.sticks.map((x) => x.dur));
-    setTimeout(() => this.onRollSettled(forPlayer), maxDur * 1000);
-  }
-
-  private onRollSettled(forPlayer: boolean): void {
-    this.updateStatus();
-    const side: Side = forPlayer ? 'player' : 'opponent';
-    if (!this.hasAnyMove(side)) {
-      this.showBanner({
-        icon: '⊘',
-        title: 'No Legal Move',
-        sub: `Rolled ${this.roll} — turn passes.`,
-        color: '#8a7041',
-        bg: '#1a1208',
-        hold: 1.6,
-      });
-      setTimeout(() => this.endTurn(), 1300);
-      this.phase = forPlayer ? 'idle' : 'ai-wait';
-      return;
-    }
-    if (forPlayer) {
-      this.phase = 'await-move';
-      this.computeHighlights('player');
-    } else {
-      this.phase = 'ai-moving';
-      this.aiPickAndMove();
-    }
-  }
-
-  /* ------------------------------ Move logic -------------------------------- */
-
-  private legalTargetForward(p: Piece, roll: number): number | null {
-    if (roll <= 0) return null;
-    const raw = p.square + roll;
-    let target = raw;
-    if (raw > PATH_END) {
-      // Exact-exit rule: only roll = 30 - square exits.
-      if (p.square + roll === PATH_END + 0) return PATH_END;
-      // Exact exit means roll === (30 - square), i.e. land on 30 precisely with
-      // an extra step rolls you off (OFF_BOARD). The app uses: target > 30 bounces.
-      const over = raw - PATH_END;
-      target = PATH_END - over;
-    }
-    if (target < 1) return null;
-    return this.validLanding(p, target);
-  }
-
-  private legalTargetBackward(p: Piece, roll: number): number | null {
-    if (roll <= 0) return null;
-    const target = p.square - roll;
-    if (target < 1) return null;
-    return this.validLanding(p, target);
-  }
-
-  private canExit(p: Piece, roll: number): number | null {
-    // Square n exits only when roll === 30 - square + 1 (land precisely past).
-    // App logic: roll exactly reaches 30 → exit (OFF_BOARD).
-    if (p.square + roll === PATH_END + 1) return OFF_BOARD;
-    if (p.square + roll === PATH_END) return PATH_END; // also allowed — treated as land on 30
-    return null;
-  }
-
-  private validLanding(p: Piece, target: number): number | null {
-    if (target < 1 || target > PATH_END) return null;
-    const occ = this.pieces.find((q) => q !== p && q.square === target);
-    if (!occ) return target;
-    if (occ.side === p.side) return null;
-    if (target === 26) return null; // Beauty protects occupant.
-    const protectedByFriend = this.pieces.some(
-      (q) =>
-        q !== occ &&
-        q.side === occ.side &&
-        (q.square === target - 1 || q.square === target + 1),
-    );
-    if (protectedByFriend) return null;
-    return target;
-  }
-
-  private hasAnyMove(side: Side): boolean {
-    if (this.roll <= 0) return false;
-    for (const p of this.pieces) {
-      if (p.side !== side || p.square > PATH_END) continue;
-      if (this.legalTargetForward(p, this.roll) !== null) return true;
-      if (this.canExit(p, this.roll) !== null) return true;
-    }
-    // Forward blocked — backward allowed.
-    for (const p of this.pieces) {
-      if (p.side !== side || p.square > PATH_END) continue;
-      if (this.legalTargetBackward(p, this.roll) !== null) return true;
-    }
-    return false;
-  }
-
-  private computeHighlights(side: Side): void {
-    this.clearHighlights();
-    const forwardAvailable = this.pieces.some(
-      (p) =>
-        p.side === side &&
-        p.square <= PATH_END &&
-        (this.legalTargetForward(p, this.roll) !== null || this.canExit(p, this.roll) !== null),
-    );
-    for (const p of this.pieces) {
-      if (p.side !== side || p.square > PATH_END) continue;
-      const fwd = this.legalTargetForward(p, this.roll);
-      const exit = this.canExit(p, this.roll);
-      const back = !forwardAvailable ? this.legalTargetBackward(p, this.roll) : null;
-      if (fwd !== null || exit !== null) this.highlightSquares.add(p.square);
-      else if (back !== null) {
-        this.highlightSquares.add(p.square);
-        this.backwardSquares.add(p.square);
-      }
-    }
-    for (const sq of this.highlightSquares) {
-      const { row, col } = pathToRC(sq);
-      const x = -BOARD_W / 2 + (col + 0.5) * CELL;
-      const z = -BOARD_D / 2 + (row + 0.5) * CELL;
-      const isBack = this.backwardSquares.has(sq);
-      const ring = new Mesh(
-        new PlaneGeometry(CELL * 1.04, CELL * 1.04),
-        new MeshStandardMaterial({
-          color: isBack ? 0xd94444 : HIGHLIGHT,
-          emissive: isBack ? 0xd94444 : HIGHLIGHT,
-          emissiveIntensity: 1.2,
-          transparent: true,
-          opacity: 0.35,
-          side: DoubleSide,
-        }),
-      );
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.set(x, 0.04, z);
-      ring.userData.isHighlight = true;
-      this.group.add(ring);
-      this.highlightMeshes.push(ring);
-    }
-  }
-
-  private clearHighlights(): void {
-    for (const m of this.highlightMeshes) {
-      this.group.remove(m);
-      m.geometry.dispose();
-      (m.material as MeshStandardMaterial).dispose();
-    }
-    this.highlightMeshes = [];
-    this.highlightSquares.clear();
-    this.backwardSquares.clear();
-  }
-
-  /* ------------------------------- Piece move ------------------------------- */
-
-  private resolveMove(p: Piece): { target: number; direction: 'forward' | 'backward' | 'exit' } | null {
-    const exit = this.canExit(p, this.roll);
-    if (exit !== null) return { target: exit, direction: exit === OFF_BOARD ? 'exit' : 'forward' };
-    const fwd = this.legalTargetForward(p, this.roll);
-    if (fwd !== null) return { target: fwd, direction: 'forward' };
-    const forwardAvailableAnywhere = this.pieces.some(
-      (q) =>
-        q.side === p.side &&
-        q.square <= PATH_END &&
-        (this.legalTargetForward(q, this.roll) !== null || this.canExit(q, this.roll) !== null),
-    );
-    if (!forwardAvailableAnywhere) {
-      const back = this.legalTargetBackward(p, this.roll);
-      if (back !== null) return { target: back, direction: 'backward' };
-    }
-    return null;
-  }
-
-  private applyMove(p: Piece, target: number): void {
-    p.preTrapSquare = p.square;
-
-    // Capture swap (opponent goes to attacker's origin).
-    const occ = this.pieces.find((q) => q !== p && q.square === target && target <= PATH_END);
-    if (occ && occ.side !== p.side) {
-      occ.square = p.preTrapSquare;
-      this.animatePiece(occ, squareWorld(occ.square));
-      this.showBanner({
-        icon: '𓂝',
-        title: p.side === 'player' ? 'Captured!' : 'The Gods Strike',
-        sub: p.side === 'player' ? 'An Eye is banished.' : 'An Ankh is driven back.',
-        color: '#d94444',
-        bg: '#1a1008',
-      });
-    }
-
-    if (target >= OFF_BOARD) {
-      p.square = OFF_BOARD;
-      if (p.side === 'player') this.exitedPlayer++;
-      else this.exitedOpponent++;
-      const exitX = BOARD_W / 2 + 1.2;
-      const exitZ = p.side === 'player' ? BOARD_D / 2 + 0.6 : -BOARD_D / 2 - 0.6;
-      // Mark so the frame loop hands control back to endTurn once the ankh
-      // has floated off the board (otherwise the turn never closes).
-      p.mesh.userData.pendingExit = true;
-      this.animatePiece(p, new Vector3(exitX, 0.25, exitZ));
-      this.showBanner({
-        icon: '☀',
-        title: 'Departure',
-        sub:
-          p.side === 'player'
-            ? 'An Ankh crosses to the afterlife.'
-            : 'An Eye escapes your reach.',
-        color: '#d4a843',
-        bg: '#2e2510',
-      });
-    } else {
-      p.square = target;
-      this.animatePiece(p, squareWorld(target));
-      // Special-square narration on LAND (applied when the animation settles).
-      this.queuePostLand(p, target);
-    }
-
-    this.phase = 'moving';
-    this.clearHighlights();
-    this.checkEnd();
-  }
-
-  private queuePostLand(p: Piece, square: number): void {
-    // We detect the landing effect on animation completion, storing intent.
-    p.mesh.userData.pendingLand = square;
-  }
-
-  private handlePostLand(p: Piece, square: number): void {
-    if (square === 26) {
-      this.showBanner({
-        icon: '✦',
-        title: 'House of Beauty',
-        sub: 'Safe haven · another throw.',
-        color: '#d4a843',
-        bg: '#2e2510',
-      });
-    } else if (square === 27) {
-      this.showBanner({
-        icon: '〰',
-        title: 'House of Water',
-        sub: 'You drown — swept back to Rebirth.',
-        color: '#4a90d9',
-        bg: '#0f1e2e',
-      });
-      // Back to 15 or nearest free lower square.
-      let back = 15;
-      while (back > 0 && this.pieces.some((q) => q !== p && q.square === back)) back--;
-      p.square = back || 1;
-      this.animatePiece(p, squareWorld(p.square));
-    } else if (square === 15 && p.preTrapSquare !== 15) {
-      this.showBanner({
-        icon: '☥',
-        title: 'House of Rebirth',
-        sub: 'The journey begins anew.',
-        color: '#44b87a',
-        bg: '#1a2e1a',
-      });
-    } else if (MATH_TRAP_SQUARES.has(square)) {
-      if (p.side === 'player') {
-        this.openTrap(p, square);
-        return; // trap modal takes over
-      }
-      // Bot: resolve the trap silently — 70% pass, 30% fail.
-      this.resolveBotTrap(p, square);
-      return;
-    }
-    // Continue flow.
-    if (!this.isSolved) this.scheduleTurnEnd();
-  }
-
-  private resolveBotTrap(p: Piece, _square: number): void {
-    const pass = Math.random() < 0.7;
-    if (pass) {
-      this.showBanner({
-        icon: '𓁹',
-        title: 'Thoth Favours the Gods',
-        sub: 'The opponent answers correctly.',
-        color: '#7b2d8e',
-        bg: '#140c22',
-        hold: 1.6,
-      });
-    } else {
-      p.square = p.preTrapSquare;
-      this.animatePiece(p, squareWorld(p.square));
-      this.showBanner({
-        icon: '𓁹',
-        title: 'Thoth Denies the Gods',
-        sub: 'The opponent falters — driven back.',
-        color: '#44b87a',
-        bg: '#0f2018',
-        hold: 1.6,
-      });
-      this.lastRollExtra = false;
-    }
-    setTimeout(() => {
-      if (this.phase !== 'won' && this.phase !== 'lost') this.endTurn();
-    }, 1100);
-  }
-
-  private scheduleTurnEnd(): void {
-    setTimeout(() => {
-      if (this.phase === 'won' || this.phase === 'lost') return;
-      this.endTurn();
-    }, 350);
-  }
-
-  private animatePiece(p: Piece, to: Vector3): void {
-    p.anim.from.copy(p.mesh.position);
-    p.anim.to.copy(to);
-    p.anim.t = 0;
-    p.anim.dur = ANIM_DUR;
-    p.anim.hop = 0.65;
-    p.anim.active = true;
-  }
-
-  private endTurn(): void {
-    const extra = this.lastRollExtra && this.roll > 0;
-    const wasBeauty = this.pieces.some((p) => p.square === 26 && p.side === this.turn);
-    this.roll = -1;
-    this.lastRollExtra = false;
+    const { marked, result } = this.rollSmartPlayer();
+    this.stickStates = marked;
+    this.throwResult = result;
+    this.hasExtraTurn = result === 1 || result === 4 || result === 5;
     this.turnCount++;
-    if (extra || wasBeauty) {
-      this.phase = this.turn === 'player' ? 'idle' : 'ai-wait';
-      if (this.turn === 'opponent') this.scheduleAI();
-      this.updateStatus();
-      return;
+
+    const moves = this.computeValidMoves(this.playerPieces, this.opponentPieces, result);
+    this.validDestinations = moves;
+
+    if (moves.size === 0) {
+      this.phase = 'no-moves';
+      this.showStatus('No legal moves \u2014 turn passes.', C_SAND + 'aa');
+      this.refreshUI();
+      setTimeout(() => this.endPlayerTurn(), 1000);
+    } else if (moves.size === 1) {
+      // Auto-move when only one option
+      this.phase = 'threw';
+      this.refreshUI();
+      const [idx, dest] = moves.entries().next().value!;
+      setTimeout(() => this.executePlayerMove(idx, dest), 400);
+    } else {
+      this.phase = 'threw';
+      this.showStatus('Select an Ankh piece to move.', C_GOLD);
+      this.refreshUI();
     }
-    this.turn = this.turn === 'player' ? 'opponent' : 'player';
-    this.phase = this.turn === 'player' ? 'idle' : 'ai-wait';
-    if (this.turn === 'opponent') this.scheduleAI();
-    this.updateStatus();
   }
 
-  private checkEnd(): void {
-    if (this.exitedPlayer >= 2) {
+  /* ═══════════════════ Move computation (iOS logic) ═════════════ */
+
+  private computeValidMoves(pieces: number[], against: number[], roll: number): Map<number, number> {
+    const moves = new Map<number, number>();
+
+    for (let idx = 0; idx < pieces.length; idx++) {
+      const pos = pieces[idx];
+      if (pos >= OFF_BOARD) continue;
+      const dest = pos + roll;
+
+      // Squares >= 27: can only exit with exact roll
+      if (pos >= 27) {
+        if (roll === OFF_BOARD - pos) moves.set(idx, OFF_BOARD);
+        continue;
+      }
+
+      if (dest >= OFF_BOARD) {
+        // Exact exit from squares >= 25
+        if (pos >= 25 && dest === OFF_BOARD) { moves.set(idx, OFF_BOARD); }
+        // Bounce back
+        if (dest > OFF_BOARD && pos < 27) {
+          const bounce = OFF_BOARD - (dest - OFF_BOARD);
+          if (bounce >= 0 && bounce < OFF_BOARD && !pieces.includes(bounce)) {
+            moves.set(idx, bounce);
+          }
+        }
+        continue;
+      }
+
+      // Can't land on own piece
+      if (pieces.includes(dest)) continue;
+
+      // Capture check
+      if (against.includes(dest)) {
+        const prot = against.some(p => p !== dest && Math.abs(p - dest) === 1 && p < OFF_BOARD);
+        if (prot) continue;
+        if (dest === 25) continue; // Beauty protects
+      }
+
+      moves.set(idx, dest);
+    }
+
+    // Backward moves if no forward moves available (level >= 2)
+    if (moves.size === 0 && this.level >= 2) {
+      for (let idx = 0; idx < pieces.length; idx++) {
+        const pos = pieces[idx];
+        if (pos >= OFF_BOARD) continue;
+        const backDest = pos - roll;
+        if (backDest < 0) continue;
+        if (pieces.includes(backDest)) continue;
+
+        if (against.includes(backDest)) {
+          const prot = against.some(p => p !== backDest && Math.abs(p - backDest) === 1 && p < OFF_BOARD);
+          if (prot) continue;
+          if (backDest === 25) continue;
+        }
+
+        moves.set(idx, backDest);
+      }
+    }
+
+    return moves;
+  }
+
+  /* ═══════════════════ Board click handling ══════════════════════ */
+
+  private handleBoardClick(e: MouseEvent): void {
+    if (this.phase !== 'threw') return;
+    const rect = (e.target as HTMLCanvasElement).getBoundingClientRect();
+    const scaleX = BOARD_W / rect.width;
+    const scaleY = BOARD_H / rect.height;
+    const mx = (e.clientX - rect.left) * scaleX;
+    const my = (e.clientY - rect.top) * scaleY;
+    const col = Math.floor(mx / CELL_PX);
+    const row = Math.floor(my / CELL_PX);
+    if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return;
+    const clickedPos = rowColToPos(row, col);
+
+    // Check if clicking a player piece that has a valid move
+    for (const [idx, dest] of this.validDestinations) {
+      if (this.playerPieces[idx] === clickedPos) {
+        this.executePlayerMove(idx, dest);
+        return;
+      }
+    }
+
+    // Check if clicking a valid destination
+    for (const [idx, dest] of this.validDestinations) {
+      if (dest === clickedPos) {
+        this.executePlayerMove(idx, dest);
+        return;
+      }
+    }
+  }
+
+  /* ═══════════════════ Player move ═══════════════════════════════ */
+
+  private executePlayerMove(pieceIndex: number, dest: number): void {
+    const from = this.playerPieces[pieceIndex];
+
+    // Capture?
+    if (dest < OFF_BOARD) {
+      const capturedIdx = this.opponentPieces.indexOf(dest);
+      if (capturedIdx >= 0) {
+        this.opponentPieces[capturedIdx] = from;
+        this.showBanner('\ud80c\udcdd', 'Captured!', 'An Eye is banished.', C_DANGER_RED, 2.0);
+      }
+    }
+
+    this.playerPieces[pieceIndex] = dest;
+    this.validDestinations.clear();
+    this.phase = 'moving';
+
+    // Handle bearing off
+    if (dest >= OFF_BOARD) {
+      this.showStatus('\u2600 An Ankh crosses to the afterlife.', C_GOLD);
+      this.drawBoard();
+      this.handleSpecialLanding(pieceIndex, dest, from, true);
+      return;
+    }
+
+    this.drawBoard();
+    this.handleSpecialLanding(pieceIndex, dest, from, true);
+  }
+
+  /* ═══════════════════ Special landing (iOS logic) ═══════════════ */
+
+  private handleSpecialLanding(pieceIndex: number, dest: number, from: number, isPlayer: boolean): void {
+    // Math trap (player only)
+    if (isPlayer && this.trapSquares.has(dest) && dest < OFF_BOARD) {
+      this.triggerMathTrap(pieceIndex, from);
+      return;
+    }
+
+    // House of Water (26) => drown, respawn near 14
+    if (dest === 26) {
+      this.showBanner('\u301C', 'House of Water', 'Swept back to Rebirth.', C_WATER_BLUE, 2.0);
+      const respawn = this.findRespawnPosition(14,
+        isPlayer ? this.playerPieces : this.opponentPieces,
+        isPlayer ? this.opponentPieces : this.playerPieces);
+      if (isPlayer) this.playerPieces[pieceIndex] = respawn;
+      else this.opponentPieces[pieceIndex] = respawn;
+      this.drawBoard();
+      if (isPlayer) {
+        setTimeout(() => this.finishPlayerTurn(), 600);
+      }
+      return;
+    }
+
+    // House of Beauty (25) => extra turn
+    if (dest === 25) {
+      this.hasExtraTurn = true;
+      if (isPlayer) this.showBanner('\u2726', 'House of Beauty', 'Safe haven \u00b7 another throw.', C_GOLD, 2.0);
+    }
+
+    // House of Rebirth (14)
+    if (dest === 14 && from !== 14) {
+      if (isPlayer) this.showBanner('\u2625', 'House of Rebirth', 'The journey begins anew.', C_SPIRIT_GREEN, 2.0);
+    }
+
+    // Three Truths (27)
+    if (dest === 27 && isPlayer) {
+      this.showBanner('III', 'House of Three Truths', 'Judgement awaits.', '#E8A030', 2.0);
+    }
+
+    // Re-Atum (28)
+    if (dest === 28 && isPlayer) {
+      this.showBanner('II', 'House of Re-Atum', 'Eternal return.', '#E8A030', 2.0);
+    }
+
+    // Departure (29)
+    if (dest === 29 && isPlayer) {
+      this.showBanner('\u2600', 'House of Departure', 'The final threshold.', C_GOLD, 2.0);
+    }
+
+    // Bearing off
+    if (dest >= OFF_BOARD && isPlayer) {
+      this.showStatus('\u2600 An Ankh crosses to the afterlife.', C_GOLD);
+    }
+
+    if (isPlayer) this.finishPlayerTurn();
+  }
+
+  private finishPlayerTurn(): void {
+    this.validDestinations.clear();
+
+    // Check win
+    if (this.playerPieces.every(p => p >= OFF_BOARD)) {
       this.phase = 'won';
       this.isSolved = true;
-      this.showBanner({
-        icon: '𓅃',
-        title: 'Victory',
-        sub: 'The Ankhs cross into eternity.',
-        color: '#44b87a',
-        bg: '#0f2018',
-        hold: 3.2,
-      });
-      setTimeout(() => this.onSolved?.('player'), 2400);
-    } else if (this.exitedOpponent >= 2) {
-      this.phase = 'lost';
-      this.isSolved = true; // advance the run either way
-      this.showBanner({
-        icon: '𓁹',
-        title: 'The Gods Prevail',
-        sub: 'Chronos laughs — the run continues.',
-        color: '#d94444',
-        bg: '#1a0808',
-        hold: 3.2,
-      });
-      setTimeout(() => this.onSolved?.('opponent'), 2400);
-    }
-  }
-
-  /* ----------------------------------- AI ----------------------------------- */
-
-  private scheduleAI(): void {
-    this.phase = 'ai-wait';
-    this.aiTimer = AI_DELAY;
-    this.updateStatus();
-  }
-
-  private aiPickAndMove(): void {
-    // Collect candidates and pick a capture-preferring one with slight disadvantage
-    // (AI doesn't exit aggressively to keep the jam game tense but winnable).
-    const cands: { p: Piece; target: number; capture: boolean; isExit: boolean }[] = [];
-    for (const p of this.pieces) {
-      if (p.side !== 'opponent' || p.square > PATH_END) continue;
-      const res = this.resolveMove(p);
-      if (!res) continue;
-      const capture = this.pieces.some(
-        (q) => q !== p && q.square === res.target && q.side === 'player' && res.target <= PATH_END,
-      );
-      cands.push({ p, target: res.target, capture, isExit: res.direction === 'exit' });
-    }
-    if (cands.length === 0) {
-      setTimeout(() => this.endTurn(), 500);
+      this.showBanner('\ud80c\udd43', 'Victory', 'The Ankhs cross into eternity.', C_SPIRIT_GREEN, 3.5);
+      this.showStatus('VICTORY \u2014 All Ankhs departed.', C_SPIRIT_GREEN);
+      this.refreshUI();
+      setTimeout(() => this.onSolved?.(), 2000);
       return;
     }
-    cands.sort((a, b) => {
-      if (a.capture !== b.capture) return a.capture ? -1 : 1;
-      // Slight bias against exiting (keep them on the board a bit).
-      if (a.isExit !== b.isExit) return a.isExit ? 1 : -1;
-      return a.p.square - b.p.square;
-    });
-    const pick = cands[0];
-    this.applyMove(pick.p, pick.target);
+
+    // Check turn limit
+    if (this.turnCount >= this.maxTurns) {
+      this.phase = 'lost';
+      this.showBanner('\ud80c\udc39', 'Turns Exhausted', 'The path remains unfinished.', C_DANGER_RED, 3.5);
+      this.showStatus('DEFEAT \u2014 Turns exhausted.', C_DANGER_RED);
+      this.refreshUI();
+      return;
+    }
+
+    this.endPlayerTurn();
   }
 
-  /* --------------------------------- Traps --------------------------------- */
+  private endPlayerTurn(): void {
+    if (this.hasExtraTurn) {
+      this.hasExtraTurn = false;
+      this.phase = 'ready';
+      this.throwResult = 0;
+      this.showStatus('\u27f3 Extra turn!', C_SPIRIT_GREEN);
+      this.refreshUI();
+      return;
+    }
 
-  private openTrap(p: Piece, square: number): void {
-    this.pendingTrap = { piece: p, targetSquare: square };
-    // Re-roll until we get a prompt that hasn't been shown recently.
-    let candidate: Trap;
-    let tries = 0;
-    do {
-      candidate = generateTrap();
-      tries++;
-    } while (this.recentPrompts.includes(candidate.prompt) && tries < 24);
-    this.trap = candidate;
-    this.recentPrompts.push(candidate.prompt);
-    if (this.recentPrompts.length > 20) this.recentPrompts.shift();
-    this.trapInput = '';
-    this.trapRemaining = TRAP_TIME;
-    this.phase = 'trap';
-    this.renderTrap();
-    if (this.trapEl) this.trapEl.style.display = 'flex';
-    this.showBanner({
-      icon: '𓁹',
-      title: 'Thoth Challenges You',
-      sub: 'Answer within 10 seconds.',
-      color: '#7b2d8e',
-      bg: '#140c22',
-      hold: 1.6,
-    });
-    this.updateStatus();
+    this.isPlayerTurn = false;
+    this.phase = 'opponent-think';
+    this.throwResult = 0;
+    this.showStatus('Opponent is thinking...', C_SAND + 'aa');
+    this.refreshUI();
+    setTimeout(() => this.executeOpponentTurn(), 800);
   }
 
-  private renderTrap(): void {
-    if (!this.trapEl || !this.trap) return;
-    this.trapEl.innerHTML = `
-      <div style="width:min(92vw,420px);padding:26px 24px 20px;background:linear-gradient(180deg,#1e0f2e,#0b0612);border:1px solid #7b2d8e;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,0.7);font-family:system-ui,sans-serif;color:#ead6ff;text-align:center;">
-        <div style="font-size:42px;color:#b77ccc;line-height:1">𓁹</div>
-        <div style="color:#b77ccc;letter-spacing:0.18em;font-weight:700;font-size:12px;margin-top:6px">THOTH'S TRAP</div>
-        <div id="trap-timer" style="margin-top:8px;font-size:13px;letter-spacing:0.1em;color:#ddc6ff">10.0s</div>
-        <div style="margin-top:16px;font-size:19px;font-weight:600;letter-spacing:0.02em;color:#fff">${this.trap.prompt}</div>
-        <div id="trap-answer" style="margin:14px auto 4px;min-width:180px;padding:12px 18px;border:1px solid #7b2d8e;border-radius:6px;background:rgba(123,45,142,0.12);font-family:ui-monospace,monospace;font-size:22px;color:#f5d060;letter-spacing:0.12em;">?</div>
-        <div id="trap-pad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px"></div>
-      </div>`;
-    const pad = this.trapEl.querySelector('#trap-pad') as HTMLDivElement | null;
-    if (pad) {
-      const keys = ['7', '8', '9', '4', '5', '6', '1', '2', '3', '⌫', '0', '✓'];
-      for (const k of keys) {
-        const b = document.createElement('button');
-        b.textContent = k;
-        b.style.cssText =
-          'padding:14px 0;border:1px solid #7b2d8e66;background:linear-gradient(180deg,#2a1740,#14091e);color:#ead6ff;font-size:18px;font-weight:600;cursor:pointer;border-radius:5px;font-family:inherit;';
-        if (k === '✓')
-          b.style.cssText += 'color:#44b87a;border-color:#44b87a99;';
-        if (k === '⌫')
-          b.style.cssText += 'color:#d94444;border-color:#d9444499;';
-        b.addEventListener('click', () => this.onTrapKey(k));
-        pad.appendChild(b);
+  /* ═══════════════════ Opponent AI (iOS logic) ═══════════════════ */
+
+  private executeOpponentTurn(): void {
+    if (this.phase === 'won' || this.phase === 'lost') return;
+
+    const { marked, result } = this.rollDisadvantage();
+    let opponentExtra = result === 1 || result === 4 || result === 5;
+
+    this.stickStates = marked;
+    this.throwResult = result;
+
+    const moves = this.computeValidMoves(this.opponentPieces, this.playerPieces, result);
+
+    if (moves.size === 0) {
+      this.showStatus(`Opponent rolled ${result} \u2014 no moves.`, C_SAND + 'aa');
+      this.refreshUI();
+      setTimeout(() => this.returnTurnToPlayer(opponentExtra), 800);
+      return;
+    }
+
+    // AI move selection (iOS chooseBestMove logic)
+    const bestIdx = this.chooseBestMove(moves, this.opponentPieces, this.playerPieces);
+    if (bestIdx === null) {
+      setTimeout(() => this.returnTurnToPlayer(opponentExtra), 600);
+      return;
+    }
+
+    const dest = moves.get(bestIdx)!;
+    const from = this.opponentPieces[bestIdx];
+
+    // Capture?
+    if (dest < OFF_BOARD) {
+      const capturedIdx = this.playerPieces.indexOf(dest);
+      if (capturedIdx >= 0) {
+        this.playerPieces[capturedIdx] = from;
+        this.showBanner('\ud80c\udcdd', 'The Gods Strike', 'An Ankh is driven back.', C_DANGER_RED, 2.0);
       }
     }
-    this.renderTrapAnswer();
+
+    this.opponentPieces[bestIdx] = dest;
+    this.refreshUI();
+
+    // Handle special landing for opponent
+    setTimeout(() => {
+      // House of Water
+      if (dest === 26) {
+        const respawn = this.findRespawnPosition(14, this.opponentPieces, this.playerPieces);
+        this.opponentPieces[bestIdx] = respawn;
+        this.refreshUI();
+        setTimeout(() => this.returnTurnToPlayer(false), 600);
+        return;
+      }
+
+      // Beauty => extra
+      if (dest === 25) opponentExtra = true;
+
+      // Check opponent win
+      if (this.opponentPieces.every(p => p >= OFF_BOARD)) {
+        this.phase = 'lost';
+        this.showBanner('\ud80c\udc39', 'The Gods Prevail', 'Chronos laughs.', C_DANGER_RED, 3.5);
+        this.showStatus('DEFEAT \u2014 The opponent escaped.', C_DANGER_RED);
+        this.refreshUI();
+        return;
+      }
+
+      if (dest >= OFF_BOARD) {
+        this.showStatus('An Eye crosses to the afterlife.', C_WATER_BLUE);
+      }
+
+      this.returnTurnToPlayer(opponentExtra);
+    }, 500);
   }
 
-  private renderTrapAnswer(): void {
-    if (!this.trapEl) return;
-    const el = this.trapEl.querySelector('#trap-answer') as HTMLDivElement | null;
-    if (el) el.textContent = this.trapInput === '' ? '?' : this.trapInput;
+  private returnTurnToPlayer(opponentExtra: boolean): void {
+    if (this.phase === 'won' || this.phase === 'lost') return;
+
+    if (opponentExtra && !this.opponentPieces.every(p => p >= OFF_BOARD)) {
+      setTimeout(() => this.executeOpponentTurn(), 600);
+      return;
+    }
+
+    this.isPlayerTurn = true;
+    this.phase = 'ready';
+    this.throwResult = 0;
+    this.showStatus('Your turn \u2014 throw the sticks.', C_GOLD);
+    this.refreshUI();
   }
 
-  private renderTrapTimer(): void {
-    if (!this.trapEl) return;
-    const el = this.trapEl.querySelector('#trap-timer') as HTMLDivElement | null;
-    if (!el) return;
-    const remaining = Math.max(0, this.trapRemaining);
-    el.textContent = `${remaining.toFixed(1)}s`;
-    el.style.color = remaining <= 3 ? '#d94444' : '#ddc6ff';
-    el.style.fontWeight = remaining <= 3 ? '700' : '400';
+  private chooseBestMove(moves: Map<number, number>, pieces: number[], against: number[]): number | null {
+    if (moves.size === 0) return null;
+    let bestIdx: number | null = null;
+    let bestScore = -Infinity;
+
+    for (const [idx, dest] of moves) {
+      const from = pieces[idx];
+      let score = dest * 2;
+      if (dest >= OFF_BOARD) score += 150;
+      if (against.includes(dest) && dest < OFF_BOARD) score += 60;
+      if (dest === 26) score -= 120;
+      if (dest === 25) score += 45;
+      if (dest === 27 || dest === 28) score += 20;
+
+      if (this.level >= 3) {
+        const willProtect = pieces.some((p, i) => i !== idx && Math.abs(p - dest) === 1 && p < OFF_BOARD);
+        if (willProtect) score += 15;
+        const wasProtecting = pieces.some((p, i) => i !== idx && Math.abs(p - from) === 1 && p < OFF_BOARD);
+        if (wasProtecting) score -= 8;
+      }
+      if (this.level >= 4) {
+        const nearEnemy = against.some(p => Math.abs(p - dest) === 1 && p < OFF_BOARD);
+        const willProtect = pieces.some((p, i) => i !== idx && Math.abs(p - dest) === 1 && p < OFF_BOARD);
+        if (nearEnemy && !willProtect) score -= 15;
+      }
+      if (this.level >= 5 && from < 10) score += 10;
+
+      if (score > bestScore) { bestScore = score; bestIdx = idx; }
+    }
+    return bestIdx;
+  }
+
+  /* ═══════════════════ Math trap ═════════════════════════════════ */
+
+  private triggerMathTrap(pieceIndex: number, previousPos: number): void {
+    let candidate: Trap;
+    let tries = 0;
+    do { candidate = generateTrap(this.level); tries++; }
+    while (this.recentPrompts.includes(candidate.prompt) && tries < 24);
+    this.recentPrompts.push(candidate.prompt);
+    if (this.recentPrompts.length > 20) this.recentPrompts.shift();
+
+    this.trapQuestion = candidate.prompt;
+    this.trapAnswer = candidate.answer;
+    this.trapInput = '';
+    this.trapPieceIndex = pieceIndex;
+    this.trapPreviousPos = previousPos;
+    this.trapTimer = TRAP_TIME;
+    this.trapActive = true;
+    this.phase = 'math-trap';
+
+    this.showBanner('\ud80c\udc39', 'Thoth Challenges You', 'Answer within 10 seconds.', C_THOTH_PURPLE, 1.8);
+    this.renderTrapOverlay();
+    this.startTrapCountdown();
+  }
+
+  private renderTrapOverlay(): void {
+    if (!this.overlayEl) return;
+    this.overlayEl.style.display = 'flex';
+
+    const card = document.createElement('div');
+    Object.assign(card.style, {
+      maxWidth: '340px', width: '90%', padding: '0',
+      background: `linear-gradient(to bottom, #140C22, #1E1230, #140C22)`,
+      border: `1.5px solid ${C_THOTH_PURPLE}88`,
+      borderRadius: '14px', boxShadow: `0 0 30px ${C_THOTH_PURPLE}22`,
+      fontFamily: "'Rajdhani', system-ui, sans-serif",
+      animation: 'senet-pop 0.25s ease-out',
+    });
+
+    // Header
+    const header = document.createElement('div');
+    Object.assign(header.style, {
+      padding: '14px 18px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    });
+    const titleEl = document.createElement('div');
+    Object.assign(titleEl.style, { color: C_THOTH_PURPLE, fontSize: '14px', fontWeight: '700', letterSpacing: '0.08em' });
+    titleEl.textContent = '\ud80c\udc39 THOTH\u2019S TRAP';
+    const timerEl = document.createElement('div');
+    timerEl.id = 'senet-trap-timer';
+    Object.assign(timerEl.style, { color: C_GOLD, fontSize: '20px', fontWeight: '900', fontVariantNumeric: 'tabular-nums' });
+    timerEl.textContent = `${TRAP_TIME}`;
+    header.append(titleEl, timerEl);
+    card.appendChild(header);
+
+    // Question
+    const promptEl = document.createElement('div');
+    Object.assign(promptEl.style, {
+      padding: '4px 18px 10px', textAlign: 'center', color: C_SAND,
+      fontSize: '15px', fontWeight: '500', lineHeight: '1.5',
+    });
+    promptEl.textContent = this.trapQuestion;
+    card.appendChild(promptEl);
+
+    // Answer display
+    const ansEl = document.createElement('div');
+    ansEl.id = 'senet-trap-answer';
+    Object.assign(ansEl.style, {
+      margin: '0 18px 10px', padding: '10px', textAlign: 'center',
+      fontSize: '24px', fontWeight: '700', fontVariantNumeric: 'tabular-nums',
+      color: C_GOLD, background: C_DEEP_BROWN, borderRadius: '8px',
+      border: `1.5px solid ${C_THOTH_PURPLE}77`,
+    });
+    ansEl.textContent = '?';
+    card.appendChild(ansEl);
+
+    // Numpad
+    const pad = document.createElement('div');
+    Object.assign(pad.style, {
+      display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px',
+      padding: '0 18px 14px',
+    });
+    const keys = ['7', '8', '9', '4', '5', '6', '1', '2', '3', '\u232b', '0', '\u2713'];
+    for (const k of keys) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = k;
+      Object.assign(btn.style, {
+        padding: '12px 0', border: `1px solid ${C_THOTH_PURPLE}55`,
+        background: k === '\u2713'
+          ? `linear-gradient(180deg, #C888E8, ${C_THOTH_PURPLE})`
+          : '#1E1230',
+        color: k === '\u2713' ? '#140C22' : k === '\u232b' ? C_DANGER_RED : C_SAND,
+        fontSize: '18px', fontWeight: '700', fontFamily: 'inherit',
+        borderRadius: '6px', cursor: 'pointer',
+      });
+      btn.addEventListener('click', () => this.onTrapKey(k));
+      pad.appendChild(btn);
+    }
+    card.appendChild(pad);
+
+    this.overlayEl.innerHTML = '';
+    this.overlayEl.appendChild(card);
   }
 
   private onTrapKey(k: string): void {
-    if (this.phase !== 'trap' || !this.trap) return;
-    if (k === '⌫') {
+    if (!this.trapActive) return;
+    if (k === '\u232b') {
       this.trapInput = this.trapInput.slice(0, -1);
-      this.renderTrapAnswer();
+    } else if (k === '\u2713') {
+      this.submitTrap();
       return;
-    }
-    if (k === '✓') {
-      this.resolveTrap();
-      return;
-    }
-    if (this.trapInput.length < 5) {
+    } else if (this.trapInput.length < 6) {
       this.trapInput += k;
-      this.renderTrapAnswer();
     }
+    const el = document.getElementById('senet-trap-answer');
+    if (el) el.textContent = this.trapInput || '?';
   }
 
-  private resolveTrap(timedOut = false): void {
-    if (!this.trap || !this.pendingTrap) return;
-    const correct = !timedOut && parseInt(this.trapInput, 10) === this.trap.answer;
-    if (this.trapEl) this.trapEl.style.display = 'none';
-    const p = this.pendingTrap.piece;
-    if (correct) {
-      this.showBanner({
-        icon: '☥',
-        title: 'Thoth Approves',
-        sub: 'Your piece holds the square.',
-        color: '#44b87a',
-        bg: '#0f2018',
-      });
+  private startTrapCountdown(): void {
+    clearInterval(this.trapTimerId);
+    this.trapTimerId = window.setInterval(() => {
+      if (!this.trapActive) { clearInterval(this.trapTimerId); return; }
+      this.trapTimer--;
+      const el = document.getElementById('senet-trap-timer');
+      if (el) {
+        el.textContent = String(Math.max(0, this.trapTimer));
+        el.style.color = this.trapTimer <= 3 ? C_DANGER_RED : C_GOLD;
+      }
+      if (this.trapTimer <= 0) {
+        this.failTrap(true);
+      }
+    }, 1000);
+  }
+
+  private submitTrap(): void {
+    if (!this.trapActive) return;
+    clearInterval(this.trapTimerId);
+    const val = parseInt(this.trapInput, 10);
+    if (!isNaN(val) && val === this.trapAnswer) {
+      this.trapActive = false;
+      if (this.overlayEl) this.overlayEl.style.display = 'none';
+      this.showBanner('\u2625', 'Thoth Approves', 'Your piece holds the square.', C_SPIRIT_GREEN, 2.0);
+      this.phase = 'moving';
+      this.finishPlayerTurn();
     } else {
-      // Snap piece back to preTrapSquare.
-      p.square = p.preTrapSquare;
-      this.animatePiece(p, squareWorld(p.square));
-      this.showBanner({
-        icon: '𓁹',
-        title: timedOut ? 'Out of Time' : 'Thoth Denies You',
-        sub:
-          timedOut
-            ? 'The hourglass runs dry.'
-            : `Answer was ${this.trap.answer}. Your piece retreats.`,
-        color: '#d94444',
-        bg: '#140808',
-      });
-      this.lastRollExtra = false; // no bonus even on 1/4/5
+      this.failTrap(false);
     }
-    this.pendingTrap = null;
-    this.trap = null;
-    this.trapInput = '';
-    this.phase = 'moving';
-    setTimeout(() => this.endTurn(), 900);
   }
 
-  /* --------------------------------- Frame --------------------------------- */
+  private failTrap(timedOut: boolean): void {
+    clearInterval(this.trapTimerId);
+    this.trapActive = false;
+    if (this.overlayEl) this.overlayEl.style.display = 'none';
+
+    const correctAnswer = this.trapAnswer;
+    this.showBanner('\ud80c\udc39',
+      timedOut ? 'Out of Time' : 'Thoth Denies You',
+      timedOut ? 'The hourglass runs dry.' : `Answer was ${correctAnswer}. Your piece retreats.`,
+      C_DANGER_RED, 2.4);
+
+    // Snap piece back
+    this.playerPieces[this.trapPieceIndex] = this.trapPreviousPos;
+    this.hasExtraTurn = false;
+    this.phase = 'moving';
+    this.drawBoard();
+    setTimeout(() => this.finishPlayerTurn(), 800);
+  }
+
+  /* ═══════════════════ Helpers ═══════════════════════════════════ */
+
+  private findRespawnPosition(target: number, own: number[], other: number[]): number {
+    if (!own.includes(target) && !other.includes(target)) return target;
+    for (let offset = 1; offset < 30; offset++) {
+      const before = target - offset;
+      if (before >= 0 && !own.includes(before) && !other.includes(before)) return before;
+      const after = target + offset;
+      if (after < 30 && !own.includes(after) && !other.includes(after)) return after;
+    }
+    return 0;
+  }
+
+  private resetGame(): void {
+    this.setupLevel();
+    this.drawBoard();
+    this.refreshUI();
+    this.showStatus('Your turn \u2014 throw the sticks.', C_GOLD);
+  }
+
+  /* ═══════════════════ Lifecycle ═════════════════════════════════ */
 
   update(dt: number, camera: PerspectiveCamera): void {
-    camera.position.set(0, 13.5, BOARD_D / 2 + 6.5);
-    camera.lookAt(0, 0, 0.2);
-
+    camera.position.set(0, 3.2, 7);
+    camera.lookAt(0, -1, 0);
     this.updateBanner(dt);
-
-    // Stick toss: parabolic flight + tumble, landing spread across the front edge.
-    for (const s of this.sticks) {
-      if (!s.anim) continue;
-      s.t += dt;
-      const k = Math.min(1, s.t / s.dur);
-      // ease-in for lift-off, ease-out for landing.
-      const horiz = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
-      s.mesh.position.x = s.startX + (s.endX - s.startX) * horiz;
-      s.mesh.position.z = s.startZ + (s.endZ - s.startZ) * horiz;
-      // Parabolic arc: y rises to peakY at k=0.5, lands on the table by k=1.
-      const up = Math.sin(k * Math.PI);
-      const endY = 0.15;
-      s.mesh.position.y = (1 - k) * s.startY + k * endY + (s.peakY - Math.max(s.startY, endY)) * up;
-      // Rotations decelerate into the final face.
-      const e = 1 - Math.pow(1 - k, 3);
-      s.mesh.rotation.x = s.rotXStart + (s.rotXEnd - s.rotXStart) * e;
-      s.mesh.rotation.z = s.rotZStart + (s.rotZEnd - s.rotZStart) * e;
-      if (k >= 1) {
-        s.mesh.position.set(s.endX, endY, s.endZ);
-        // Snap rotation to the canonical resting face (0 or π on X, 0 on Z).
-        s.mesh.rotation.x = s.up ? 0 : Math.PI;
-        s.mesh.rotation.z = 0;
-        s.anim = false;
-      }
-    }
-
-    // Piece animations with hop arc
-    let anyMoving = false;
-    for (const p of this.pieces) {
-      if (!p.anim.active) continue;
-      p.anim.t += dt;
-      const k = Math.min(1, p.anim.t / p.anim.dur);
-      const ease = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
-      p.mesh.position.lerpVectors(p.anim.from, p.anim.to, ease);
-      p.mesh.position.y =
-        Math.max(p.anim.from.y, p.anim.to.y) + Math.sin(k * Math.PI) * p.anim.hop;
-      if (k >= 1) {
-        p.mesh.position.copy(p.anim.to);
-        p.anim.active = false;
-        const pending = p.mesh.userData.pendingLand as number | undefined;
-        const exited = p.mesh.userData.pendingExit as boolean | undefined;
-        if (pending !== undefined) {
-          delete p.mesh.userData.pendingLand;
-          this.handlePostLand(p, pending);
-        } else if (exited) {
-          delete p.mesh.userData.pendingExit;
-          if (!this.isSolved) this.scheduleTurnEnd();
-        }
-      } else anyMoving = true;
-    }
-
-    if (this.phase === 'moving' && !anyMoving && !this.pendingTrap) {
-      // Nothing pending — safety net ensures we never hang.
-    }
-
-    if (this.phase === 'trap') {
-      this.trapRemaining -= dt;
-      this.renderTrapTimer();
-      if (this.trapRemaining <= 0) this.resolveTrap(true);
-    }
-
-    if (this.phase === 'ai-wait') {
-      this.aiTimer -= dt;
-      if (this.aiTimer <= 0) {
-        this.phase = 'ai-rolling';
-        this.animateSticks(false);
-      }
-    }
   }
 
-  onPointerDown(ndc: Vector2, camera: PerspectiveCamera): void {
-    if (this.phase !== 'await-move' || this.turn !== 'player' || this.roll < 0) return;
-    this.raycaster.setFromCamera(ndc, camera);
-    const meshes: Mesh[] = [];
-    for (const p of this.pieces)
-      if (p.side === 'player' && p.square <= PATH_END) meshes.push(p.mesh);
-    const hits = this.raycaster.intersectObjects(meshes, true);
-    if (hits.length === 0) return;
-    // Walk up to the pedestal mesh that owns userData.piece.
-    let obj: { parent: unknown; userData: { piece?: Piece } } | null = hits[0].object as unknown as {
-      parent: unknown;
-      userData: { piece?: Piece };
-    };
-    while (obj && !obj.userData.piece) obj = obj.parent as typeof obj;
-    const p = obj?.userData.piece;
-    if (!p || !this.highlightSquares.has(p.square)) return;
-    const res = this.resolveMove(p);
-    if (!res) return;
-    this.applyMove(p, res.target);
+  onPointerDown(_ndc: Vector2, _camera: PerspectiveCamera): void {
+    // Board clicks handled via DOM event on canvas
   }
 
   override dispose(): void {
-    const el = document.getElementById('puzzle-senet-root');
-    if (el) el.remove();
+    clearInterval(this.trapTimerId);
+    if (this.root) { this.root.remove(); this.root = null; }
+    const animStyle = document.getElementById('senet-anims');
+    if (animStyle) animStyle.remove();
+    this.ctx2d = null;
+    this.hudEl = null;
     this.statusEl = null;
-    this.rollBtn = null;
-    this.rulesEl = null;
+    this.sticksEl = null;
+    this.throwBtn = null;
+    this.overlayEl = null;
     this.bannerEl = null;
-    this.trapEl = null;
-    this.trapTimerEl = null;
     super.dispose();
   }
 }
