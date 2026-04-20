@@ -8,6 +8,8 @@
  * space-game feel the builder's stats panel establishes.
  */
 
+import { SaveManager } from '../core/SaveManager.ts';
+
 export class Hud {
   readonly root: HTMLDivElement;
   private eraLabel: HTMLDivElement;
@@ -42,6 +44,7 @@ export class Hud {
    *  active, letting the player abandon a puzzle without solving it. */
   private exitBtn!: HTMLButtonElement;
   private exitHandler: (() => void) | null = null;
+  private resetBtn!: HTMLButtonElement;
 
   constructor(parent: HTMLElement = document.body) {
     this.root = document.createElement('div');
@@ -109,10 +112,22 @@ export class Hud {
     this.exitBtn = document.createElement('button');
     this.exitBtn.className = 'hud-exit-btn';
     this.exitBtn.type = 'button';
-    this.exitBtn.textContent = '← Torna alla mappa';
+    this.exitBtn.textContent = '← Return to map';
     this.exitBtn.style.display = 'none';
     this.exitBtn.addEventListener('click', () => {
       if (this.exitHandler) this.exitHandler();
+    });
+
+    // "New Game" reset button — top-right, always visible. Clears the
+    // save and reloads so the player starts fresh from the ship builder.
+    this.resetBtn = document.createElement('button');
+    this.resetBtn.className = 'hud-reset-btn';
+    this.resetBtn.type = 'button';
+    this.resetBtn.textContent = 'New Game';
+    this.resetBtn.addEventListener('click', () => {
+      if (!confirm('Start a new game? All progress will be lost.')) return;
+      SaveManager.clear();
+      location.reload();
     });
 
     this.root.append(
@@ -123,6 +138,7 @@ export class Hud {
       this.winEl,
       this.controlsEl,
       this.exitBtn,
+      this.resetBtn,
     );
     parent.appendChild(this.root);
   }
@@ -162,8 +178,8 @@ export class Hud {
     };
 
     // Current wired-up inputs (see core/Input.ts).
-    addRow(['W', 'A', 'S', 'D'], 'Pilota (yaw / pitch / strafe)');
-    addRow(['↑', '↓', '←', '→'], 'Alternativa ai WASD');
+    addRow(['W', 'A', 'S', 'D'], 'Fly (yaw / pitch / strafe)');
+    addRow(['↑', '↓', '←', '→'], 'Alt. movement');
     addRow(['␣ SPACE'], 'Boost');
 
     wrap.append(title, rows);
@@ -178,12 +194,19 @@ export class Hud {
   showExitButton(onClick: () => void): void {
     this.exitHandler = onClick;
     this.exitBtn.style.display = 'inline-flex';
+    // Dim the rest of the HUD — gameplay telemetry (speed, HP, ankhs,
+    // controls legend) is irrelevant inside a puzzle, and keeping it
+    // visible fights the puzzle's own top-left/top-center UI for
+    // attention. The exit button stays on top (z-index 40 within the
+    // HUD stacking context at z-index 30, above puzzle overlays at 25).
+    this.root.classList.add('hud--in-puzzle');
   }
 
   /** Hide the exit button — called when the puzzle ends (solved or abandoned). */
   hideExitButton(): void {
     this.exitHandler = null;
     this.exitBtn.style.display = 'none';
+    this.root.classList.remove('hud--in-puzzle');
   }
 
   private buildLoadoutPanel(): HTMLDivElement {
@@ -321,12 +344,13 @@ export class Hud {
         transition: transform 0.15s ease-out, box-shadow 0.25s ease-out;
       }
       .hud-loadout.hit {
-        animation: hud-lo-hit 0.35s ease-out;
+        animation: hud-lo-hit 0.45s ease-out;
       }
       @keyframes hud-lo-hit {
-        0% { transform: scale(1); box-shadow: 0 0 0 rgba(255, 80, 100, 0); }
-        30% { transform: scale(1.04); box-shadow: 0 0 22px rgba(255, 80, 100, 0.7); }
-        100% { transform: scale(1); box-shadow: 0 0 0 rgba(255, 80, 100, 0); }
+        0%   { transform: scale(1);    box-shadow: 0 0 0 rgba(255, 30, 40, 0);   border-color: rgba(95, 180, 255, 0.22); }
+        15%  { transform: scale(1.06); box-shadow: 0 0 28px rgba(255, 30, 40, 0.85), inset 0 0 12px rgba(255, 40, 40, 0.3); border-color: rgba(255, 60, 60, 0.9); }
+        40%  { transform: scale(1.02); box-shadow: 0 0 14px rgba(255, 50, 60, 0.5);  border-color: rgba(255, 80, 80, 0.5); }
+        100% { transform: scale(1);    box-shadow: 0 0 0 rgba(255, 30, 40, 0);   border-color: rgba(95, 180, 255, 0.22); }
       }
       .hud-lo-row {
         display: grid;
@@ -469,37 +493,76 @@ export class Hud {
         letter-spacing: 0.04em;
       }
 
-      /* ============ Return-to-map button (top-center, during puzzles) ============ */
+      /* ============ Return-to-map button (top-right, during puzzles) ============
+       * Puzzles put their rules toggle at top-left (ⓘ RULES in Senet) and
+       * their status / primary action at top-center (THROW STICKS in
+       * Senet). Top-right is the only corner consistently empty across
+       * every checkpoint, so the exit button lives there — no overlap
+       * with puzzle UI, predictable position. */
       .hud-exit-btn {
         position: absolute;
         top: 18px;
-        left: 50%;
-        transform: translateX(-50%);
+        right: 22px;
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        padding: 8px 16px;
+        padding: 10px 18px;
         font-family: 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
         font-size: 13px;
         font-weight: 600;
         letter-spacing: 0.1em;
         color: #e6faff;
-        background: rgba(6, 10, 22, 0.78);
-        border: 1px solid rgba(95, 180, 255, 0.45);
+        background: rgba(6, 10, 22, 0.82);
+        border: 1px solid rgba(95, 180, 255, 0.5);
+        border-right: 3px solid #5fc8ff;
         border-radius: 4px;
         backdrop-filter: blur(10px);
         -webkit-backdrop-filter: blur(10px);
         cursor: pointer;
         pointer-events: auto;
         z-index: 40;
+        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
         transition: background 0.15s ease-out, border-color 0.15s ease-out, transform 0.1s ease-out;
       }
       .hud-exit-btn:hover {
-        background: rgba(20, 40, 72, 0.9);
-        border-color: rgba(95, 200, 255, 0.8);
+        background: rgba(20, 40, 72, 0.92);
+        border-color: rgba(95, 200, 255, 0.85);
       }
       .hud-exit-btn:active {
-        transform: translateX(-50%) scale(0.97);
+        transform: scale(0.97);
+      }
+
+      /* ============ "New Game" reset button (top-right) ============ */
+      .hud-reset-btn {
+        position: absolute;
+        top: 18px;
+        right: 22px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 14px;
+        font-family: 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        color: rgba(230, 250, 255, 0.7);
+        background: rgba(6, 10, 22, 0.6);
+        border: 1px solid rgba(255, 100, 120, 0.3);
+        border-radius: 4px;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        cursor: pointer;
+        pointer-events: auto;
+        z-index: 40;
+        transition: background 0.15s ease-out, border-color 0.15s ease-out, color 0.15s ease-out;
+      }
+      .hud-reset-btn:hover {
+        color: #ffa0a8;
+        background: rgba(40, 10, 16, 0.85);
+        border-color: rgba(255, 100, 120, 0.7);
+      }
+      .hud-reset-btn:active {
+        transform: scale(0.97);
       }
     `;
     document.head.appendChild(s);

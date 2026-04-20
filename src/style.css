@@ -36,7 +36,20 @@ body {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: 10;
+  /* Above any puzzle overlay (puzzles use z-index 20–25). This lets the
+   * exit button and any HUD we explicitly keep visible sit on top of the
+   * checkpoint UI. Bounded below the crash-flash (z-index 999) and the
+   * IntroScreen (z-index 50) so neither is occluded. */
+  z-index: 30;
+}
+
+/* Applied while a checkpoint puzzle is active. Hides every gameplay HUD
+ * element (badge / readout / orb / loadout / controls legend) so they
+ * don't overlap the puzzle's own top-left rules button, top-center
+ * status, etc. The exit button stays visible so the player can always
+ * bail back to the galaxy map. */
+.hud.hud--in-puzzle > *:not(.hud-exit-btn) {
+  display: none !important;
 }
 
 .hud-badge {
