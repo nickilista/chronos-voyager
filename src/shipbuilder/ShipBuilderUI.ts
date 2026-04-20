@@ -132,11 +132,11 @@ export class ShipBuilderUI {
         btn.innerHTML = `
           <div class="sb-preset-lock">🔒</div>
           <div class="sb-preset-name">${shipInfo.name}</div>
-          <div class="sb-preset-class">${partCount}/${SHIP_PART_UNLOCK_THRESHOLD} pezzi</div>
+          <div class="sb-preset-class">${partCount}/${SHIP_PART_UNLOCK_THRESHOLD} parts</div>
         `;
         btn.title =
-          `${shipInfo.name} · Bloccata\n` +
-          `Distruggi meteoriti nello spazio aperto per trovare pezzi di questa nave (${partCount}/${SHIP_PART_UNLOCK_THRESHOLD}).`;
+          `${shipInfo.name} · Locked\n` +
+          `Destroy meteorites in open space to find parts of this ship (${partCount}/${SHIP_PART_UNLOCK_THRESHOLD}).`;
         btn.addEventListener('click', () => {
           btn.classList.remove('sb-preset--shake');
           void btn.offsetWidth; // reflow to restart animation
@@ -251,12 +251,32 @@ export class ShipBuilderUI {
     for (const cls of SHIP_CLASSES) {
       const opt = document.createElement('option');
       opt.value = cls;
-      opt.textContent = this.props.registry.ships[cls].name;
+      const unlocked = SaveManager.isUnlocked(cls, this.props.save);
+      // Locked ships stay visible in the dropdown so the player knows
+      // they exist and can see progress toward unlocking them — but
+      // they can't be picked. The native <option disabled> gives us the
+      // grey-out + unselectable behaviour for free.
+      opt.disabled = !unlocked;
+      if (unlocked) {
+        opt.textContent = this.props.registry.ships[cls].name;
+      } else {
+        const count = SaveManager.getPartCount(cls, this.props.save);
+        opt.textContent = `🔒 ${this.props.registry.ships[cls].name}  (${count}/${SHIP_PART_UNLOCK_THRESHOLD})`;
+      }
       if (this.config[slot] === cls) opt.selected = true;
       select.appendChild(opt);
     }
     select.addEventListener('change', () => {
-      this.config[slot] = select.value as ShipClass;
+      // Defensive: the native <option disabled> prevents selection, but
+      // in case a future browser quirk slips through we revalidate and
+      // revert to the previous value if the user ended up on a locked
+      // class somehow.
+      const chosen = select.value as ShipClass;
+      if (!SaveManager.isUnlocked(chosen, this.props.save)) {
+        select.value = this.config[slot];
+        return;
+      }
+      this.config[slot] = chosen;
       this.props.onConfigChange({ ...this.config });
     });
     this.selects[slot] = select;

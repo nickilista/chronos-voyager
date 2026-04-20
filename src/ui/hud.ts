@@ -181,6 +181,7 @@ export class Hud {
     addRow(['W', 'A', 'S', 'D'], 'Fly (yaw / pitch / strafe)');
     addRow(['↑', '↓', '←', '→'], 'Alt. movement');
     addRow(['␣ SPACE'], 'Boost');
+    addRow(['LMB', 'J', 'F'], 'Fire');
 
     wrap.append(title, rows);
     return wrap;

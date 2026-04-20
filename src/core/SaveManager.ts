@@ -24,11 +24,15 @@ const ERA_IDS: readonly EraId[] = [
 /**
  * Number of "ship-part" drops a player has to collect for a given
  * locked ship class before that ship becomes selectable in the Hangar.
- * Three feels right — enough that it's not trivial, low enough that
- * playing through the first couple of eras tends to unlock 2-3 ships
- * at the natural drop rate from meteorite kills.
+ *
+ * Ten, one conceptual part per slot (hull, cockpit, wing_L, wing_R,
+ * engine_main, engine_aux, weapon_primary, weapon_secondary, shield,
+ * tail). The fiction: each meteorite drop is "a piece of the ship" —
+ * collect all 10 pieces to rebuild it. The actual drop assignment is
+ * random (any slot's worth counts toward the same tally), the label
+ * on the progress chip just makes it feel physical.
  */
-export const SHIP_PART_UNLOCK_THRESHOLD = 3;
+export const SHIP_PART_UNLOCK_THRESHOLD = 10;
 
 /**
  * Ships a fresh-start player has access to. Everything else starts

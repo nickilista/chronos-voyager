@@ -992,14 +992,14 @@ export class Game {
     if (!lockedClass) return; // every ship already unlocked — nothing to award
     const result = SaveManager.awardPart(lockedClass, this.save);
     this.saveProgress();
-    // Toast: "Pezzo di <class> raccolto — 2/3" or the unlock flourish.
+    // Toast: "Part collected · <class> 2/10" or the unlock flourish.
     if (result.unlocked) {
       getAudio().playEraComplete();
-      this.showUnlockToast(`Nave sbloccata: ${lockedClass.toUpperCase()}`, 'unlock');
+      this.showUnlockToast(`Ship unlocked: ${lockedClass.toUpperCase()}`, 'unlock');
     } else {
       getAudio().playPickup();
       this.showUnlockToast(
-        `Pezzo raccolto · ${lockedClass.toUpperCase()} ${result.count}/${SHIP_PART_UNLOCK_THRESHOLD}`,
+        `Part collected · ${lockedClass.toUpperCase()} ${result.count}/${SHIP_PART_UNLOCK_THRESHOLD}`,
         'part',
       );
     }
