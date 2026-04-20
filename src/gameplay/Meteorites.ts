@@ -305,6 +305,17 @@ export class Meteorites {
     this.scene = null;
   }
 
+  /**
+   * Read-only accessor over the currently-live meteorites. Used by the
+   * aim-assist system to pick a lock-on candidate each frame. We hand
+   * back the internal array directly (not a copy) because the caller
+   * only reads; any mutation would be a bug and TypeScript's readonly
+   * modifier would catch it at the call site. Zero-alloc per frame.
+   */
+  getActive(): readonly { position: Vector3 }[] {
+    return this.active;
+  }
+
   // ---- internals ----
 
   private spawnOne(shipPos: Vector3, shipVel: Vector3): void {

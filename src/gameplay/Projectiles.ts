@@ -1,5 +1,6 @@
 import {
   AdditiveBlending,
+  CylinderGeometry,
   Group,
   Mesh,
   MeshBasicMaterial,
@@ -8,109 +9,226 @@ import {
   Vector3,
 } from 'three';
 import type { Meteorites } from './Meteorites.ts';
+import { type WeaponKind, WEAPON_PALETTE } from './WeaponTypes.ts';
 
 /**
- * Ship primary weapon — glowy orb-bullets.
+ * Ship weapons — three distinct render kinds, one shared pool architecture.
  *
- * Why a small fixed pool instead of spawn-on-demand: the fire cadence (8/sec)
- * combined with a 2.5s lifetime means ~20 bullets can live at once, and the
- * player pulls the trigger a LOT over a session. Allocating/GCing Mesh +
- * Material + Geometry per shot would chunk into the frame time. 32 pre-
- * allocated slots cover the worst case (boost + full-auto) with headroom.
+ * A single `Projectiles` instance owns:
+ *   • 32 projectile slots shared between `pulse` (chunky plasma orbs) and
+ *     `bolt` (fast narrow slugs). Both travel, both collide per-frame via
+ *     Meteorites.tryHit — only geometry / color / speed / damage differ.
+ *   • 12 beam-effect slots for `beam` (hit-scan lasers). Beams are NOT
+ *     projectiles: we raycast at fire time, apply damage immediately, and
+ *     render a brief (~90ms) glowing cylinder from muzzle to impact point.
+ *     Players see "a line of light" connecting ship to target — the laser
+ *     promise that the old orb-spam was breaking.
  *
- * Why additive MeshBasicMaterial: the game already runs a bloom pass, and
- * additive basic sidesteps the StandardMaterial lighting cost. The orbs
- * show up as warm blooming dots regardless of scene lighting, which is
- * what "energy weapon" should look like.
+ * The `weaponKind` decision lives in WeaponTypes.ts — this file is the
+ * renderer / physics, not the rules. Passed in per shot so the player
+ * switching loadouts mid-session picks up new visuals on the next trigger
+ * pull.
  *
- * Bullets inherit ship momentum so a fast-moving ship's shots lead ahead
- * of slower ones — a small thing, but it makes strafing feel right. Without
- * it, the muzzle velocity plus ship velocity wouldn't compose correctly
- * and bullets would visibly lag off a boosting ship.
+ * Why pool sizes 32 / 12: cadence × lifetime. Bolts fire at ~11/s with
+ * 2.5s lifetime → ~28 max, 32 covers the worst case. Beams fire at ~5/s
+ * with 90ms fade → well under 12 even at full-auto.
  */
 
-const POOL_SIZE = 32;
-const BULLET_RADIUS = 0.25;
-/** Muzzle speed. Matches a ~3s time-to-target at 400u range — long enough
- *  that leading a moving meteorite feels meaningful, short enough that
- *  the player doesn't have to mentally integrate trajectories. */
-const MUZZLE_SPEED = 180;
-const BULLET_LIFETIME = 2.5;
-const BULLET_RANGE = 400;
-const FIRE_COOLDOWN = 0.12;
-/** Damage per bullet. Tuned so rocky (30 hp) dies in 2 hits, iron (80 hp)
- *  takes 4. Crystal (25 hp) one-shot, which feels right for a fragile rare. */
-const BULLET_DAMAGE = 20;
+const PROJECTILE_POOL_SIZE = 32;
+const BEAM_POOL_SIZE = 12;
+/** How long the beam line stays visible on screen after a shot. 90ms is
+ *  long enough to register as a discrete "zap" without leaving a
+ *  continuous laser-sword look. */
+const BEAM_VISUAL_DURATION = 0.09;
+/** Max projectile lifetime (safety cap independent of range). */
+const PROJECTILE_LIFETIME = 2.5;
+/** Tunable radii so the three kinds are visually distinct at a glance. */
+const BOLT_RADIUS = 0.16;
+const PULSE_RADIUS = 0.55;
+const BEAM_RADIUS = 0.14;
 
-interface Bullet {
+interface Projectile {
   mesh: Mesh;
   position: Vector3;
   velocity: Vector3;
   direction: Vector3;
   life: number;
   distanceTraveled: number;
+  range: number;
+  damage: number;
+  kind: WeaponKind; // never 'beam' while active — beams don't live here
+  active: boolean;
+}
+
+interface BeamEffect {
+  mesh: Mesh;
+  material: MeshBasicMaterial;
+  life: number;
   active: boolean;
 }
 
 export class Projectiles {
   private scene: Scene | null = null;
   private readonly group = new Group();
-  private readonly bullets: Bullet[] = [];
+  private readonly projectiles: Projectile[] = [];
+  private readonly beams: BeamEffect[] = [];
   private fireCooldown = 0;
+
+  // Shared materials per projectile kind, so a pulse bolt and a bolt bolt
+  // don't share geometry/material and don't need per-shot allocations.
+  private pulseMat!: MeshBasicMaterial;
+  private boltMat!: MeshBasicMaterial;
+  private pulseGeo!: SphereGeometry;
+  private boltGeo!: SphereGeometry;
+  /** Beam geometry is a unit cylinder along +Y; per-shot we scale Y to
+   *  the beam length and rotate to point at the hit. Shared across all
+   *  beams because the visual only differs in color, which the material
+   *  owns — we clone the material per beam for independent fade. */
+  private beamGeo!: CylinderGeometry;
 
   init(scene: Scene): void {
     this.scene = scene;
     scene.add(this.group);
 
-    // Pre-allocate: one shared geometry (geometry clones are free), one
-    // shared material (all bullets look identical, so sharing saves draw-
-    // call state swaps). Each bullet still gets its own Mesh so it can
-    // have its own position in the scene graph.
-    const geo = new SphereGeometry(BULLET_RADIUS, 10, 8);
-    const mat = new MeshBasicMaterial({
-      color: 0xffaa44,
+    // One geometry per projectile size — reused across the pool.
+    this.pulseGeo = new SphereGeometry(PULSE_RADIUS, 12, 10);
+    this.boltGeo = new SphereGeometry(BOLT_RADIUS, 10, 8);
+    this.beamGeo = new CylinderGeometry(BEAM_RADIUS, BEAM_RADIUS, 1, 10, 1, true);
+
+    this.pulseMat = new MeshBasicMaterial({
+      color: WEAPON_PALETTE.pulse.core,
+      transparent: true,
+      opacity: 0.92,
+      blending: AdditiveBlending,
+      depthWrite: false,
+    });
+    this.boltMat = new MeshBasicMaterial({
+      color: WEAPON_PALETTE.bolt.core,
       transparent: true,
       opacity: 0.95,
       blending: AdditiveBlending,
       depthWrite: false,
     });
 
-    for (let i = 0; i < POOL_SIZE; i++) {
-      const mesh = new Mesh(geo, mat);
+    // Projectile pool — allocate both geometries so we can swap a slot
+    // from bolt to pulse without reallocating. Initial state: bolt.
+    for (let i = 0; i < PROJECTILE_POOL_SIZE; i++) {
+      const mesh = new Mesh(this.boltGeo, this.boltMat);
       mesh.visible = false;
-      mesh.frustumCulled = false; // tiny meshes get wrongly culled at edges
+      mesh.frustumCulled = false;
       this.group.add(mesh);
-      this.bullets.push({
+      this.projectiles.push({
         mesh,
         position: new Vector3(),
         velocity: new Vector3(),
         direction: new Vector3(0, 0, -1),
         life: 0,
         distanceTraveled: 0,
+        range: 0,
+        damage: 0,
+        kind: 'bolt',
         active: false,
       });
+    }
+
+    // Beam pool — each beam owns its own material so the fade timer
+    // doesn't leak across shots. Geometry is shared (cylinders are cheap
+    // to scale; per-shot allocation would add ~100µs * 5/s of GC churn).
+    for (let i = 0; i < BEAM_POOL_SIZE; i++) {
+      const mat = new MeshBasicMaterial({
+        color: WEAPON_PALETTE.beam.core,
+        transparent: true,
+        opacity: 0,
+        blending: AdditiveBlending,
+        depthWrite: false,
+      });
+      const mesh = new Mesh(this.beamGeo, mat);
+      mesh.visible = false;
+      mesh.frustumCulled = false;
+      this.group.add(mesh);
+      this.beams.push({ mesh, material: mat, life: 0, active: false });
     }
   }
 
   /**
-   * Request a shot this frame. Enforces cooldown internally so the Game
-   * loop can just hand this `input.fire` straight every tick — pullTrigger
-   * is a no-op until the cooldown elapses. Keeps rate-limiting in one place.
+   * Request a shot this frame. Rate-limits internally via a kind-aware
+   * cooldown so the caller can hand `input.fire` straight every tick.
+   * `meteorites` is needed here (not just in update) because beams are
+   * hitscan — they resolve damage at fire time, not next frame.
    */
-  pullTrigger(origin: Vector3, direction: Vector3, shipVelWorld: Vector3): void {
+  pullTrigger(
+    origin: Vector3,
+    direction: Vector3,
+    shipVelWorld: Vector3,
+    kind: WeaponKind,
+    meteorites: Meteorites,
+  ): void {
     if (this.fireCooldown > 0) return;
-    this.fire(origin, direction, shipVelWorld);
-    this.fireCooldown = FIRE_COOLDOWN;
+    const spec = WEAPON_PALETTE[kind];
+    if (kind === 'beam') {
+      this.fireBeam(origin, direction, meteorites, spec.range, spec.damage);
+    } else {
+      this.fireProjectile(origin, direction, shipVelWorld, kind, spec);
+    }
+    this.fireCooldown = spec.cooldown;
   }
 
-  fire(origin: Vector3, direction: Vector3, shipVelWorld: Vector3): void {
-    const slot = this.acquireSlot();
+  private fireBeam(
+    origin: Vector3,
+    direction: Vector3,
+    meteorites: Meteorites,
+    range: number,
+    damage: number,
+  ): void {
+    // Hitscan: step along the ray in discrete chunks and let
+    // Meteorites.tryHit do the sphere test at each step. Stop on first
+    // hit. Stepping is cheaper than a full O(N) swept test and keeps
+    // the point-vs-sphere code paths aligned with bolts/pulse.
+    const STEP = 4; // world units per sample
+    const maxSteps = Math.ceil(range / STEP);
+    const probe = _scratchProbe;
+    let hitAt: Vector3 | null = null;
+    for (let i = 1; i <= maxSteps; i++) {
+      probe.copy(direction).multiplyScalar(i * STEP).add(origin);
+      const hit = meteorites.tryHit(probe, direction, damage);
+      if (hit) {
+        hitAt = hit.position.clone();
+        break;
+      }
+    }
+
+    const endpoint = hitAt ?? _scratchEnd.copy(direction).multiplyScalar(range).add(origin);
+    const slot = this.acquireBeam();
     if (!slot) return;
+    this.orientBeam(slot, origin, endpoint);
+    slot.material.opacity = 1;
+    slot.life = BEAM_VISUAL_DURATION;
+    slot.active = true;
+    slot.mesh.visible = true;
+  }
+
+  private fireProjectile(
+    origin: Vector3,
+    direction: Vector3,
+    shipVelWorld: Vector3,
+    kind: 'pulse' | 'bolt',
+    spec: { core: number; glow: number; speed: number; damage: number; cooldown: number; range: number },
+  ): void {
+    const slot = this.acquireProjectile();
+    if (!slot) return;
+    // Swap geometry/material if this slot was previously a different kind.
+    if (slot.kind !== kind) {
+      slot.mesh.geometry = kind === 'pulse' ? this.pulseGeo : this.boltGeo;
+      slot.mesh.material = kind === 'pulse' ? this.pulseMat : this.boltMat;
+      slot.kind = kind;
+    }
     slot.position.copy(origin);
     slot.direction.copy(direction).normalize();
-    slot.velocity.copy(slot.direction).multiplyScalar(MUZZLE_SPEED).add(shipVelWorld);
-    slot.life = BULLET_LIFETIME;
+    slot.velocity.copy(slot.direction).multiplyScalar(spec.speed).add(shipVelWorld);
+    slot.life = PROJECTILE_LIFETIME;
     slot.distanceTraveled = 0;
+    slot.range = spec.range;
+    slot.damage = spec.damage;
     slot.mesh.position.copy(origin);
     slot.mesh.visible = true;
     slot.active = true;
@@ -119,61 +237,108 @@ export class Projectiles {
   update(dt: number, meteorites: Meteorites): void {
     this.fireCooldown = Math.max(0, this.fireCooldown - dt);
 
-    for (let i = 0; i < this.bullets.length; i++) {
-      const b = this.bullets[i];
-      if (!b.active) continue;
+    // ---- projectiles ----
+    for (let i = 0; i < this.projectiles.length; i++) {
+      const p = this.projectiles[i];
+      if (!p.active) continue;
 
-      // Advance. Range-tracking uses velocity-length * dt rather than a
-      // pre-computed constant because ship-velocity inheritance means the
-      // effective per-frame step varies per shot.
-      const stepX = b.velocity.x * dt;
-      const stepY = b.velocity.y * dt;
-      const stepZ = b.velocity.z * dt;
-      b.position.x += stepX;
-      b.position.y += stepY;
-      b.position.z += stepZ;
-      b.distanceTraveled += Math.hypot(stepX, stepY, stepZ);
-      b.mesh.position.copy(b.position);
-      b.life -= dt;
+      const stepX = p.velocity.x * dt;
+      const stepY = p.velocity.y * dt;
+      const stepZ = p.velocity.z * dt;
+      p.position.x += stepX;
+      p.position.y += stepY;
+      p.position.z += stepZ;
+      p.distanceTraveled += Math.hypot(stepX, stepY, stepZ);
+      p.mesh.position.copy(p.position);
+      p.life -= dt;
 
-      if (b.life <= 0 || b.distanceTraveled >= BULLET_RANGE) {
-        this.deactivate(b);
+      if (p.life <= 0 || p.distanceTraveled >= p.range) {
+        this.deactivateProjectile(p);
         continue;
       }
+      const hit = meteorites.tryHit(p.position, p.direction, p.damage);
+      if (hit) this.deactivateProjectile(p);
+    }
 
-      // Point-vs-sphere test via Meteorites. If a hit lands — destroying or
-      // not — the bullet spends itself. Piercing shots could skip this line
-      // but the current design wants single-target so the player has to
-      // aim each shot.
-      const hit = meteorites.tryHit(b.position, b.direction, BULLET_DAMAGE);
-      if (hit) {
-        this.deactivate(b);
+    // ---- beams ----
+    for (let i = 0; i < this.beams.length; i++) {
+      const b = this.beams[i];
+      if (!b.active) continue;
+      b.life -= dt;
+      if (b.life <= 0) {
+        b.active = false;
+        b.mesh.visible = false;
+        b.material.opacity = 0;
+        continue;
       }
+      // Linear fade 1→0 over BEAM_VISUAL_DURATION.
+      b.material.opacity = Math.max(0, b.life / BEAM_VISUAL_DURATION);
     }
   }
 
   dispose(): void {
-    // Bullets share one geometry and one material — dispose once each via
-    // the first slot, then tear down the group.
-    if (this.bullets.length > 0) {
-      const m = this.bullets[0].mesh;
-      m.geometry.dispose();
-      (m.material as MeshBasicMaterial).dispose();
-    }
+    // Shared geos + mats are owned by this class — free them.
+    this.pulseGeo?.dispose();
+    this.boltGeo?.dispose();
+    this.beamGeo?.dispose();
+    this.pulseMat?.dispose();
+    this.boltMat?.dispose();
+    for (const b of this.beams) b.material.dispose();
     if (this.scene) this.scene.remove(this.group);
     this.scene = null;
-    this.bullets.length = 0;
+    this.projectiles.length = 0;
+    this.beams.length = 0;
   }
 
-  private acquireSlot(): Bullet | null {
-    for (let i = 0; i < this.bullets.length; i++) {
-      if (!this.bullets[i].active) return this.bullets[i];
+  // ---- internals ----
+
+  private acquireProjectile(): Projectile | null {
+    for (let i = 0; i < this.projectiles.length; i++) {
+      if (!this.projectiles[i].active) return this.projectiles[i];
     }
     return null;
   }
 
-  private deactivate(b: Bullet): void {
-    b.active = false;
-    b.mesh.visible = false;
+  private acquireBeam(): BeamEffect | null {
+    for (let i = 0; i < this.beams.length; i++) {
+      if (!this.beams[i].active) return this.beams[i];
+    }
+    return null;
+  }
+
+  private deactivateProjectile(p: Projectile): void {
+    p.active = false;
+    p.mesh.visible = false;
+  }
+
+  /**
+   * Orient a beam mesh so a unit cylinder (Y-axis, length 1) becomes a
+   * segment from `from` to `to`. three.js's built-in cylinder is Y-up
+   * centred at origin, so we scale Y to the segment length, translate
+   * to the midpoint, and rotate the cylinder's up axis onto the
+   * segment direction.
+   */
+  private orientBeam(slot: BeamEffect, from: Vector3, to: Vector3): void {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const dz = to.z - from.z;
+    const length = Math.hypot(dx, dy, dz) || 1;
+    const mid = _scratchMid.set(
+      (from.x + to.x) / 2,
+      (from.y + to.y) / 2,
+      (from.z + to.z) / 2,
+    );
+    slot.mesh.position.copy(mid);
+    slot.mesh.scale.set(1, length, 1);
+    // Rotation: align +Y with the segment direction. lookAt expects a
+    // +Z alignment, so we aim the mesh at `to` and then tilt -90° X so
+    // the cylinder's length (Y) lies along what was previously forward.
+    slot.mesh.lookAt(to);
+    slot.mesh.rotateX(Math.PI / 2);
   }
 }
+
+// Scratch vectors kept at module scope so the hot path doesn't allocate.
+const _scratchProbe = new Vector3();
+const _scratchEnd = new Vector3();
+const _scratchMid = new Vector3();
