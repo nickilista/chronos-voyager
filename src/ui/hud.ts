@@ -45,6 +45,8 @@ export class Hud {
   private exitBtn!: HTMLButtonElement;
   private exitHandler: (() => void) | null = null;
   private resetBtn!: HTMLButtonElement;
+  private changeShipBtn!: HTMLButtonElement;
+  private sessionMenuEl!: HTMLDivElement;
 
   constructor(parent: HTMLElement = document.body) {
     this.root = document.createElement('div');
@@ -118,17 +120,39 @@ export class Hud {
       if (this.exitHandler) this.exitHandler();
     });
 
-    // "New Game" reset button — top-right, always visible. Clears the
-    // save and reloads so the player starts fresh from the ship builder.
+    // Session menu (top-left, under the era badge) — "Change Ship" (soft
+    // reload back to the Hangar keeping progress) + "New Game" (destructive
+    // reset). Bundled in one container so the two buttons read as a
+    // coherent session-controls group rather than two floating dots.
+    // Previously "New Game" lived alone in the top-right on top of the
+    // speed / distance readout, which the player couldn't see clearly.
+    this.sessionMenuEl = document.createElement('div');
+    this.sessionMenuEl.className = 'hud-session-menu';
+
+    this.changeShipBtn = document.createElement('button');
+    this.changeShipBtn.className = 'hud-session-btn hud-session-btn--neutral';
+    this.changeShipBtn.type = 'button';
+    this.changeShipBtn.textContent = '← Change Ship';
+    this.changeShipBtn.title = 'Return to the Hangar to pick a different ship. Progress is kept.';
+    this.changeShipBtn.addEventListener('click', () => {
+      // Non-destructive: just reload. main.ts sees the existing save and
+      // re-enters the ShipBuilder with the saved loadout as initial state,
+      // so the player can tweak slots or switch presets and relaunch.
+      location.reload();
+    });
+
     this.resetBtn = document.createElement('button');
-    this.resetBtn.className = 'hud-reset-btn';
+    this.resetBtn.className = 'hud-session-btn hud-session-btn--danger';
     this.resetBtn.type = 'button';
     this.resetBtn.textContent = 'New Game';
+    this.resetBtn.title = 'Clear all progress and start from the beginning.';
     this.resetBtn.addEventListener('click', () => {
       if (!confirm('Start a new game? All progress will be lost.')) return;
       SaveManager.clear();
       location.reload();
     });
+
+    this.sessionMenuEl.append(this.changeShipBtn, this.resetBtn);
 
     this.root.append(
       badge,
@@ -138,7 +162,7 @@ export class Hud {
       this.winEl,
       this.controlsEl,
       this.exitBtn,
-      this.resetBtn,
+      this.sessionMenuEl,
     );
     parent.appendChild(this.root);
   }
@@ -534,37 +558,54 @@ export class Hud {
         transform: scale(0.97);
       }
 
-      /* ============ "New Game" reset button (top-right) ============ */
-      .hud-reset-btn {
+      /* ============ Session menu (top-left, below era badge) ============
+       * "Change Ship" (soft reload → Hangar) + "New Game" (destructive
+       * reset). Stacked under the era badge so they never overlap with
+       * the top-right speed/distance readout or the top-center exit
+       * button. Pointer-events:auto is set on the inner buttons, not
+       * the container, so gaps between them don't steal mouse events. */
+      .hud-session-menu {
         position: absolute;
-        top: 18px;
-        right: 22px;
+        top: 82px;
+        left: 22px;
+        display: flex;
+        gap: 6px;
+      }
+      .hud-session-btn {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        padding: 6px 14px;
+        padding: 6px 12px;
         font-family: 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
         font-size: 11px;
         font-weight: 600;
         letter-spacing: 0.12em;
         color: rgba(230, 250, 255, 0.7);
         background: rgba(6, 10, 22, 0.6);
-        border: 1px solid rgba(255, 100, 120, 0.3);
+        border: 1px solid rgba(95, 180, 255, 0.3);
         border-radius: 4px;
         backdrop-filter: blur(8px);
         -webkit-backdrop-filter: blur(8px);
         cursor: pointer;
         pointer-events: auto;
-        z-index: 40;
         transition: background 0.15s ease-out, border-color 0.15s ease-out, color 0.15s ease-out;
       }
-      .hud-reset-btn:hover {
+      .hud-session-btn:hover {
+        color: #e6faff;
+        background: rgba(20, 40, 72, 0.85);
+        border-color: rgba(95, 200, 255, 0.7);
+      }
+      .hud-session-btn:active {
+        transform: scale(0.97);
+      }
+      /* Danger variant for "New Game" — same grid, warmer colors so
+       * the player doesn't accidentally mass-click past it. */
+      .hud-session-btn--danger {
+        border-color: rgba(255, 100, 120, 0.3);
+      }
+      .hud-session-btn--danger:hover {
         color: #ffa0a8;
         background: rgba(40, 10, 16, 0.85);
         border-color: rgba(255, 100, 120, 0.7);
-      }
-      .hud-reset-btn:active {
-        transform: scale(0.97);
       }
     `;
     document.head.appendChild(s);

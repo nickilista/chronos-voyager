@@ -721,8 +721,7 @@ export class StomachionPuzzle extends Puzzle {
     return null;
   }
 
-  private pointerDownTime = 0;
-  private pointerMoved = false;
+  private dragDist = 0;
 
   private onBoardPointerDown(ev: PointerEvent): void {
     if (this.isComplete) return;
@@ -732,8 +731,7 @@ export class StomachionPuzzle extends Puzzle {
     const piece = this.findPieceAtGrid(gx, gy);
     if (!piece) return;
 
-    this.pointerDownTime = Date.now();
-    this.pointerMoved = false;
+    this.dragDist = 0;
     this.draggingID = piece.id;
     this.dragStartGrid = [gx, gy];
     this.dragStartOffset = [piece.placedOffset[0], piece.placedOffset[1]];
@@ -750,15 +748,19 @@ export class StomachionPuzzle extends Puzzle {
     if (this.draggingID === null || !this.dragStartGrid || !this.dragStartOffset) return;
     ev.preventDefault();
 
-    this.pointerMoved = true;
     const [gx, gy] = this.eventToGrid(ev);
+    const dx = gx - this.dragStartGrid[0];
+    const dy = gy - this.dragStartGrid[1];
+    this.dragDist = Math.sqrt(dx * dx + dy * dy);
+
     const piece = this.pieces.find(p => p.id === this.draggingID);
     if (!piece) return;
 
-    const dx = gx - this.dragStartGrid[0];
-    const dy = gy - this.dragStartGrid[1];
-    piece.placedOffset = [this.dragStartOffset[0] + dx, this.dragStartOffset[1] + dy];
-    this.drawBoard();
+    // Only start visual drag after a minimum threshold (0.4 grid cells)
+    if (this.dragDist >= 0.4) {
+      piece.placedOffset = [this.dragStartOffset[0] + dx, this.dragStartOffset[1] + dy];
+      this.drawBoard();
+    }
   }
 
   private onBoardPointerUp(ev: PointerEvent): void {
@@ -766,7 +768,8 @@ export class StomachionPuzzle extends Puzzle {
     ev.preventDefault();
 
     const piece = this.pieces.find(p => p.id === this.draggingID);
-    const wasDrag = this.pointerMoved && (Date.now() - this.pointerDownTime > 150);
+    // A drag requires meaningful movement (>= 0.4 grid cells)
+    const wasDrag = this.dragDist >= 0.4;
 
     if (piece) {
       if (wasDrag) {
@@ -799,9 +802,11 @@ export class StomachionPuzzle extends Puzzle {
     const margin = step / 2;
     const gs = this.gridSize;
 
-    const placedPolygons: Pt[][] = this.pieces.map(piece =>
-      piece.originalPoints.map(([x, y]): Pt => [x + piece.placedOffset[0], y + piece.placedOffset[1]])
-    );
+    const placedPolygons: Pt[][] = this.pieces
+      .filter(p => p.isPlaced)
+      .map(piece =>
+        piece.originalPoints.map(([x, y]): Pt => [x + piece.placedOffset[0], y + piece.placedOffset[1]])
+      );
 
     let correct = true;
 

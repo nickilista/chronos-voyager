@@ -27,8 +27,8 @@ import { Puzzle } from './PuzzleBase.ts';
 function colCountForLevel(level: number): number { return level <= 2 ? 4 : 5; }
 function roundsForLevel(level: number): number { return [3, 3, 4, 4, 4, 5, 5, 5][Math.min(level, 8) - 1]; }
 function maxLivesForLevel(level: number): number { return level <= 6 ? 3 : 2; }
-function timerLimitForLevel(level: number): number | null {
-  switch (level) { case 6: return 30; case 7: return 25; case 8: return 20; default: return null; }
+function timerLimitForLevel(_level: number): number | null {
+  return null; // timer disabled
 }
 
 /* ── Edo palette ─────────────────────────────────────────────── */
