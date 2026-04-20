@@ -41,7 +41,8 @@ export const SHIP_PART_UNLOCK_THRESHOLD = 10;
  * new pilot isn't overwhelmed and the other 9 archetypes can feel
  * distinct when they unlock later.
  */
-export const DEFAULT_UNLOCKED: readonly ShipClass[] = ['falcon'];
+// TEMP: all ships unlocked except golem (for preview video)
+export const DEFAULT_UNLOCKED: readonly ShipClass[] = ['falcon', 'titan', 'phantom', 'viper', 'mantis', 'centurion', 'nova', 'kraken', 'valkyrie'];
 
 export interface SaveData {
   version: 2;

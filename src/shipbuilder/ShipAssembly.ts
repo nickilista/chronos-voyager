@@ -167,7 +167,7 @@ function makeShieldEthereal(group: Group): void {
     if (!m.isMesh) return;
     const mat = (m.material as MeshStandardMaterial).clone();
     mat.transparent = true;
-    mat.opacity = 0.22;
+    mat.opacity = 0.10;
     mat.depthWrite = false;
     if ('emissiveIntensity' in mat) mat.emissiveIntensity = 0.8;
     m.material = mat;
