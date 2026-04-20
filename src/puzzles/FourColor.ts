@@ -612,14 +612,18 @@ export class FourColorPuzzle extends Puzzle {
   }
 
   private isPointInRegion(px: number, py: number, region: FCRegion): boolean {
-    const path = this.buildRegionPath2D(region);
-    // Use the 2D context to test
-    const c = this.ctx2d!;
-    c.save();
-    c.setTransform(1, 0, 0, 1, 0, 0); // reset transform for hit test
-    const hit = c.isPointInPath(path, px * 2, py * 2); // account for 2x scale in canvas
-    c.restore();
-    return hit;
+    // Ray-casting point-in-polygon — works regardless of canvas transform state.
+    const verts = region.vertices;
+    const n = verts.length;
+    let inside = false;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const xi = verts[i][0] * MAP_W, yi = verts[i][1] * MAP_H;
+      const xj = verts[j][0] * MAP_W, yj = verts[j][1] * MAP_H;
+      if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
+        inside = !inside;
+      }
+    }
+    return inside;
   }
 
   private tapRegion(regionID: number): void {

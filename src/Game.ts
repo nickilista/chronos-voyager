@@ -37,7 +37,7 @@ import { Projectiles } from './gameplay/Projectiles.ts';
 import type { Obstacle } from './gameplay/obstacles/types.ts';
 import { DEFAULT_SHIP_STATS, Ship } from './gameplay/Ship.ts';
 import { AimAssist, type AimAssistState } from './gameplay/AimAssist.ts';
-import { type WeaponKind, weaponKindFor } from './gameplay/WeaponTypes.ts';
+import { type WeaponKind, weaponKindFor, weaponKindForSecondary } from './gameplay/WeaponTypes.ts';
 import { ExplosionPool } from './render/MeteoriteExplosion.ts';
 import { Crosshair } from './ui/Crosshair.ts';
 import {
@@ -102,6 +102,16 @@ const HP_RESET_DEDUCT_ANKH = true;
  *  the thruster popping from "choked" to "normal" after a single frame
  *  of recharge tickle — players see a clear stump-then-resume arc. */
 const BOOST_READY_THRESHOLD = 0.3;
+/**
+ * Global multiplier on the per-ship `boostDuration` stat, applied only
+ * to the drain side. 2.0 = the boost reservoir lasts twice as long as
+ * the raw stat suggests. Chosen by playtest feedback: the per-ship
+ * durations in ships-config.json felt stingy once meteorites + dodging
+ * were in the mix, and bumping every ship's value in the config would
+ * desync from the iOS source of truth. One knob here keeps the pacing
+ * tunable without touching the ship catalogue.
+ */
+const BOOST_DURATION_MULTIPLIER = 2.0;
 
 /** Every-slot Falcon loadout — used as a fallback when the game is
  *  constructed without a builder result (dev / portal-inbound fast-path
@@ -198,6 +208,10 @@ export class Game {
    *  game (not currently possible), we'd refresh this from the new
    *  stats. Defaults to 'bolt' pre-init. */
   private weaponKind: WeaponKind = 'bolt';
+  /** Secondary-weapon render kind. Always resolves to a different family
+   *  than the primary (see weaponKindForSecondary) so the two slots read
+   *  as meaningfully different weapons, not two orbs in different shades. */
+  private secondaryWeaponKind: WeaponKind = 'pulse';
   /** HUD reticle + lock brackets. Constructed once in `start()`. */
   private crosshair: Crosshair | null = null;
   /** Soft lock-on state machine: tracks the 2s dwell timer and feeds
@@ -472,12 +486,17 @@ export class Game {
       console.error('[Game] combat init failed', err);
     }
 
-    // Resolve the primary weapon's render kind from the ship's stats. A
-    // Falcon with `primaryType: 'laser'` gets `weaponKind = 'beam'`; a
-    // Viper with `primaryType: 'pulse'` gets `'pulse'`; everything else
-    // falls through to `'bolt'`. See src/gameplay/WeaponTypes.ts.
+    // Resolve the primary + secondary weapon's render kinds from the
+    // ship's stats. Falcon: laser (beam) + machinegun (bolt). The
+    // secondary resolver guarantees a DIFFERENT family than the primary
+    // even when the raw types collapse to the same kind (titan's
+    // railgun+missile both read as 'bolt' by default, for example).
     const stats = this.builderResult?.stats ?? DEFAULT_SHIP_STATS;
     this.weaponKind = weaponKindFor(stats.primaryType);
+    this.secondaryWeaponKind = weaponKindForSecondary(
+      stats.primaryType,
+      stats.secondaryType,
+    );
 
     // HUD crosshair + soft lock-on reticle. Mounted into document.body so
     // it sits above the GL canvas but separate from `.hud` — that way a
@@ -635,7 +654,11 @@ export class Game {
   private updateBoostEnergy(dt: number, boosting: boolean): void {
     const stats = this.builderResult?.stats ?? DEFAULT_SHIP_STATS;
     if (boosting) {
-      const drain = 1 / Math.max(0.5, stats.boostDuration);
+      // Effective duration = stat × global multiplier. 2.0 makes every
+      // ship's boost last twice as long without having to rewrite
+      // ships-config.json.
+      const effectiveDuration = Math.max(0.5, stats.boostDuration * BOOST_DURATION_MULTIPLIER);
+      const drain = 1 / effectiveDuration;
       this.boostEnergy = Math.max(0, this.boostEnergy - drain * dt);
     } else {
       const refill = 1 / Math.max(0.5, stats.boostCooldown);
@@ -1100,7 +1123,7 @@ export class Game {
   private readonly _fireOrigin = new Vector3();
   private readonly _fireForward = new Vector3();
   private readonly _fireDirection = new Vector3();
-  private fireFromShipNose(): void {
+  private fireFromShipNose(channel: 'primary' | 'secondary'): void {
     if (!this.projectiles || !this.meteorites) return;
     this._fireForward.set(0, 0, -1).applyQuaternion(this.ship.group.quaternion);
     this._fireOrigin.copy(this.ship.group.position).addScaledVector(this._fireForward, 2.0);
@@ -1114,12 +1137,14 @@ export class Game {
       this.aimState.targetWorld,
       this._fireDirection,
     );
+    const kind = channel === 'primary' ? this.weaponKind : this.secondaryWeaponKind;
     this.projectiles.pullTrigger(
       this._fireOrigin,
       this._fireDirection,
       this.ship.velocity,
-      this.weaponKind,
+      kind,
       this.meteorites,
+      channel,
     );
   }
 
@@ -1283,7 +1308,8 @@ export class Game {
         }
       }
       if (this.projectiles) {
-        if (input.fire) this.fireFromShipNose();
+        if (input.fire) this.fireFromShipNose('primary');
+        if (input.fireSecondary) this.fireFromShipNose('secondary');
         if (this.meteorites) this.projectiles.update(dt, this.meteorites);
       }
       if (this.explosions) this.explosions.update(dt);

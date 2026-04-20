@@ -192,7 +192,7 @@ export class StomachionPuzzle extends Puzzle {
     'Tap a piece in the tray to place it on the board. Drag placed pieces to reposition. Tap a placed piece to return it to the tray. Arrange all pieces to fill the square exactly.';
 
   private gridSize = 12;
-  private tileSize = 14; // hardest: 19 pieces on 12x12 grid
+  private tileSize = 12; // hardest valid set: 14 pieces on 12x12 grid
   private pieces: StomachionPiece[] = [];
   private placedCounter = 0;
   private isComplete = false;

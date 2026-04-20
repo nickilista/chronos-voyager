@@ -67,12 +67,18 @@ interface BeamEffect {
   active: boolean;
 }
 
+export type FireChannel = 'primary' | 'secondary';
+
 export class Projectiles {
   private scene: Scene | null = null;
   private readonly group = new Group();
   private readonly projectiles: Projectile[] = [];
   private readonly beams: BeamEffect[] = [];
-  private fireCooldown = 0;
+  /** Cooldowns tracked per channel so holding both LMB and RMB fires
+   *  each weapon at its own rate — without this the secondary weapon
+   *  would just eat the primary's cadence or vice-versa. */
+  private primaryCooldown = 0;
+  private secondaryCooldown = 0;
 
   // Shared materials per projectile kind, so a pulse bolt and a bolt bolt
   // don't share geometry/material and don't need per-shot allocations.
@@ -151,10 +157,12 @@ export class Projectiles {
   }
 
   /**
-   * Request a shot this frame. Rate-limits internally via a kind-aware
-   * cooldown so the caller can hand `input.fire` straight every tick.
-   * `meteorites` is needed here (not just in update) because beams are
-   * hitscan — they resolve damage at fire time, not next frame.
+   * Request a shot this frame. Rate-limits internally via per-channel
+   * cooldowns so the caller can hand `input.fire` / `input.fireSecondary`
+   * straight every tick without the primary weapon stealing the
+   * secondary's timing or vice-versa. `meteorites` is needed here (not
+   * just in update) because beams are hitscan — they resolve damage at
+   * fire time, not next frame.
    */
   pullTrigger(
     origin: Vector3,
@@ -162,15 +170,18 @@ export class Projectiles {
     shipVelWorld: Vector3,
     kind: WeaponKind,
     meteorites: Meteorites,
+    channel: FireChannel = 'primary',
   ): void {
-    if (this.fireCooldown > 0) return;
+    const cd = channel === 'primary' ? this.primaryCooldown : this.secondaryCooldown;
+    if (cd > 0) return;
     const spec = WEAPON_PALETTE[kind];
     if (kind === 'beam') {
       this.fireBeam(origin, direction, meteorites, spec.range, spec.damage);
     } else {
       this.fireProjectile(origin, direction, shipVelWorld, kind, spec);
     }
-    this.fireCooldown = spec.cooldown;
+    if (channel === 'primary') this.primaryCooldown = spec.cooldown;
+    else this.secondaryCooldown = spec.cooldown;
   }
 
   private fireBeam(
@@ -235,7 +246,8 @@ export class Projectiles {
   }
 
   update(dt: number, meteorites: Meteorites): void {
-    this.fireCooldown = Math.max(0, this.fireCooldown - dt);
+    this.primaryCooldown = Math.max(0, this.primaryCooldown - dt);
+    this.secondaryCooldown = Math.max(0, this.secondaryCooldown - dt);
 
     // ---- projectiles ----
     for (let i = 0; i < this.projectiles.length; i++) {

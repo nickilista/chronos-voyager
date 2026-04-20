@@ -45,6 +45,30 @@ export function weaponKindFor(type: string | undefined): WeaponKind {
 }
 
 /**
+ * Resolve the secondary weapon's render kind, guaranteeing it differs
+ * from the primary. Two ships in ships-config.json have primary+secondary
+ * that naturally collapse to the same family (titan=bolt/bolt,
+ * kraken=pulse/pulse); for those we bump the secondary into a distinct
+ * family so the player actually sees two different weapons.
+ *
+ * Shift policy: bolt → pulse, pulse → bolt (preserves projectile feel —
+ * both are throwable), beam never needs shifting since the 2 conflict
+ * cases are bolt/bolt and pulse/pulse. If a future ship has double-beam
+ * we'd remap to pulse.
+ */
+export function weaponKindForSecondary(
+  primaryType: string | undefined,
+  secondaryType: string | undefined,
+): WeaponKind {
+  const primary = weaponKindFor(primaryType);
+  const secondary = weaponKindFor(secondaryType);
+  if (secondary !== primary) return secondary;
+  if (primary === 'bolt') return 'pulse';
+  if (primary === 'pulse') return 'bolt';
+  return 'pulse';
+}
+
+/**
  * Per-kind visual palette. Used by Projectiles and the crosshair's lock
  * confirmation flash. Hex numbers, not strings, so three.js consumes them
  * without re-parsing.
