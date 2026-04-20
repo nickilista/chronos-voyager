@@ -172,7 +172,15 @@ export class ShipBuilderUI {
 
     // Vibe Jam 2026 compliance is handled by the async widget script loaded
     // in index.html — no manual anchor needed in the builder overlay.
-    root.append(header, slotsPanel, statsPanel, bottom);
+    // On mobile, slots + stats go inside the bottom drawer so they scroll
+    // together below launch + presets (and the 3D ship is visible in the gap).
+    const isMobileView = window.innerWidth <= 600;
+    if (isMobileView) {
+      bottom.append(slotsPanel, statsPanel);
+      root.append(header, bottom);
+    } else {
+      root.append(header, slotsPanel, statsPanel, bottom);
+    }
     parent.appendChild(root);
     this.root = root;
   }
@@ -742,77 +750,109 @@ const CSS = `
   .sb-launch-main { font-size: 16px; }
 }
 
-/* ═══ Phone portrait ═══ */
+/* ═══ Phone portrait ═══
+ * Layout: top bar (title + launch) → transparent middle (3D ship visible)
+ * → bottom drawer (presets + panels collapsed by default).
+ * The sb-root becomes a flex column that doesn't scroll — the bottom
+ * drawer scrolls internally. The middle gap lets the WebGL canvas
+ * show through since sb-root has no background. */
 @media (max-width: 600px) {
   .sb-root {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto auto;
-    grid-template-areas:
-      "header"
-      "bottom"
-      "slots"
-      "stats";
-    gap: 6px;
-    padding: 8px;
-    padding-top: max(8px, env(safe-area-inset-top, 0px));
-    padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    /* Semi-transparent background so 3D ship preview shows through panels */
-    background: rgba(0, 0, 0, 0.35);
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
+    padding-top: max(6px, env(safe-area-inset-top, 0px));
+    padding-bottom: 0;
+    overflow: hidden;
   }
+
+  /* ── Top bar: title + launch button side by side ── */
   .sb-header {
-    padding-left: 2px;
-    background: none;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    flex-shrink: 0;
+    pointer-events: auto;
+    background: linear-gradient(180deg, rgba(0,0,0,0.7) 0%, transparent 100%);
   }
   .sb-title {
-    font-size: clamp(16px, 5vw, 22px);
-    letter-spacing: 0.14em;
+    font-size: 15px;
+    letter-spacing: 0.1em;
   }
-  .sb-subtitle { font-size: 10px; letter-spacing: 0.18em; }
-  .sb-panel {
-    max-height: 40vh;
-    padding: 10px 10px 12px;
-    /* Slightly more transparent so ship is partially visible behind */
-    background: rgba(4, 8, 18, 0.82);
-  }
-  .sb-slots, .sb-stats {
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-  .sb-slot { margin-bottom: 5px; }
-  .sb-slot-label { font-size: 9px; }
-  .sb-slot-select { padding: 7px 8px; font-size: 13px; min-height: 44px; }
-  .sb-panel-title { font-size: 10px; margin-bottom: 10px; padding-bottom: 6px; }
-  /* Launch button first and prominent — most important CTA */
+  .sb-subtitle { display: none; }
+
+  /* ── Middle: empty — 3D ship shows through ── */
+  /* Panels + bottom get pushed down, leaving a transparent gap */
+
+  /* ── Bottom drawer: presets + collapsible panels ── */
   .sb-bottom {
     flex-direction: column;
-    gap: 8px;
+    gap: 0;
+    order: 10;
+    margin-top: auto; /* push to bottom */
+    max-height: 52vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: linear-gradient(0deg, rgba(4,8,18,0.92) 70%, rgba(4,8,18,0.6) 95%, transparent 100%);
+    padding: 10px 10px max(10px, env(safe-area-inset-bottom, 0px));
+    pointer-events: auto;
   }
+
+  /* Launch button — full width, prominent, at the top of the drawer */
   .sb-launch {
-    order: -1;
-    padding: 16px 20px;
+    order: -2;
     width: 100%;
+    padding: 14px 16px;
     border-radius: 8px;
-    box-shadow: 0 0 30px rgba(95, 200, 255, 0.5);
+    margin-bottom: 8px;
+    box-shadow: 0 0 24px rgba(95, 200, 255, 0.45);
+    flex-shrink: 0;
   }
   .sb-launch-kicker { font-size: 9px; }
-  .sb-launch-main { font-size: 18px; }
+  .sb-launch-main { font-size: 17px; }
   .sb-launch-hint { display: none; }
+
+  /* Presets — horizontal scroll strip */
   .sb-presets {
-    padding: 8px 10px 10px;
+    order: -1;
+    padding: 6px 8px 8px;
     gap: 6px;
+    flex-shrink: 0;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-    -webkit-mask-image: linear-gradient(to right, black 80%, transparent);
-    mask-image: linear-gradient(to right, black 80%, transparent);
+    -webkit-mask-image: linear-gradient(to right, black 82%, transparent);
+    mask-image: linear-gradient(to right, black 82%, transparent);
+    margin-bottom: 6px;
   }
-  .sb-preset { min-width: 76px; padding: 7px 9px; min-height: 44px; }
-  .sb-presets-label { font-size: 9px; padding-right: 6px; margin-right: 2px; }
+  .sb-preset { min-width: 74px; padding: 6px 8px; min-height: 44px; }
+  .sb-preset-name { font-size: 12px; }
+  .sb-preset-class { font-size: 8px; }
+  .sb-presets-label { font-size: 8px; padding-right: 5px; margin-right: 2px; }
+
+  /* Panels inside the drawer — compact, collapsed by default */
+  .sb-panel {
+    max-height: 30vh;
+    padding: 10px 10px 12px;
+    background: rgba(8, 14, 28, 0.85);
+    margin-bottom: 6px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-shrink: 0;
+    border-radius: 6px;
+  }
+  /* Stats panel hidden by default on mobile — modules is enough to get started */
+  .sb-stats { display: none; }
+  .sb-panel-title { font-size: 10px; margin-bottom: 8px; padding-bottom: 5px; }
+  .sb-slot { margin-bottom: 4px; }
+  .sb-slot-label { font-size: 9px; }
+  .sb-slot-select { padding: 6px 8px; font-size: 13px; min-height: 40px; }
   .sb-stat-grid { row-gap: 3px; column-gap: 8px; }
   .sb-stat-label { font-size: 10px; }
   .sb-stat-val { font-size: 11px; }
-  .sb-bar-group { margin-bottom: 10px; }
-  .sb-specials-title { margin-top: 10px; margin-bottom: 6px; }
+  .sb-bar-group { margin-bottom: 8px; }
+  .sb-specials-title { margin-top: 8px; margin-bottom: 4px; }
 }
 `;
