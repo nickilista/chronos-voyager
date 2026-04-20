@@ -1,0 +1,125 @@
+{
+  "ships": {
+    "falcon": { "name": "Falcon", "class": "Light Fighter", "description": "Caccia leggero aerodinamico, bilanciato e versatile" },
+    "titan": { "name": "Titan", "class": "Battleship", "description": "Corazzata pesante, lenta ma devastante" },
+    "phantom": { "name": "Phantom", "class": "Stealth", "description": "Nave furtiva, angolare e letale nell'ombra" },
+    "viper": { "name": "Viper", "class": "Interceptor", "description": "Intercettore velocissimo, agile e aggressivo" },
+    "mantis": { "name": "Mantis", "class": "Bio-Ship", "description": "Nave insettiforme organica, imprevedibile" },
+    "centurion": { "name": "Centurion", "class": "Military", "description": "Nave militare classica, affidabile e robusta" },
+    "nova": { "name": "Nova", "class": "Energy", "description": "Nave energetica cristallina, potente ma fragile" },
+    "kraken": { "name": "Kraken", "class": "Alien", "description": "Nave aliena tentacolare, misteriosa e temibile" },
+    "valkyrie": { "name": "Valkyrie", "class": "Elegant", "description": "Nave elegante nordica, equilibrata e aggraziata" },
+    "golem": { "name": "Golem", "class": "Industrial", "description": "Nave industriale robusta, corazzata ma goffa" }
+  },
+  "slots": ["hull", "cockpit", "wing_L", "wing_R", "engine_main", "engine_aux", "weapon_primary", "weapon_secondary", "shield", "tail"],
+  "partStats": {
+    "hull": {
+      "falcon":    { "hp": 80,  "weight": 50,  "armor": 3, "rollBonus": 1.2, "pitchBonus": 1.1 },
+      "titan":     { "hp": 200, "weight": 120, "armor": 8, "rollBonus": 0.6, "pitchBonus": 0.7 },
+      "phantom":   { "hp": 60,  "weight": 40,  "armor": 2, "rollBonus": 1.0, "pitchBonus": 1.0, "stealthBonus": 0.3 },
+      "viper":     { "hp": 55,  "weight": 35,  "armor": 2, "rollBonus": 1.5, "pitchBonus": 1.4 },
+      "mantis":    { "hp": 90,  "weight": 55,  "armor": 4, "rollBonus": 1.1, "pitchBonus": 1.0, "regenRate": 2 },
+      "centurion": { "hp": 120, "weight": 75,  "armor": 6, "rollBonus": 0.9, "pitchBonus": 0.9 },
+      "nova":      { "hp": 50,  "weight": 30,  "armor": 1, "rollBonus": 1.3, "pitchBonus": 1.2, "energyBonus": 1.5 },
+      "kraken":    { "hp": 110, "weight": 70,  "armor": 5, "rollBonus": 0.8, "pitchBonus": 0.8, "fearAura": 10 },
+      "valkyrie":  { "hp": 85,  "weight": 50,  "armor": 4, "rollBonus": 1.1, "pitchBonus": 1.1 },
+      "golem":     { "hp": 180, "weight": 130, "armor": 9, "rollBonus": 0.5, "pitchBonus": 0.5 }
+    },
+    "cockpit": {
+      "falcon":    { "visibility": 85,  "targetingBonus": 1.1, "radarRange": 500 },
+      "titan":     { "visibility": 60,  "targetingBonus": 1.0, "radarRange": 800, "crewCapacity": 3 },
+      "phantom":   { "visibility": 70,  "targetingBonus": 1.3, "radarRange": 400, "stealthBonus": 0.2 },
+      "viper":     { "visibility": 90,  "targetingBonus": 1.2, "radarRange": 450 },
+      "mantis":    { "visibility": 95,  "targetingBonus": 1.0, "radarRange": 600, "senseRange": 200 },
+      "centurion": { "visibility": 75,  "targetingBonus": 1.1, "radarRange": 700 },
+      "nova":      { "visibility": 100, "targetingBonus": 1.4, "radarRange": 550, "energyScanRange": 300 },
+      "kraken":    { "visibility": 80,  "targetingBonus": 0.9, "radarRange": 750, "psychicRange": 250 },
+      "valkyrie":  { "visibility": 88,  "targetingBonus": 1.2, "radarRange": 500 },
+      "golem":     { "visibility": 55,  "targetingBonus": 0.8, "radarRange": 900, "crewCapacity": 5 }
+    },
+    "wing_L": {
+      "falcon":    { "liftForce": 70,  "rollRate": 1.2, "drag": 0.8, "maneuverability": 80 },
+      "titan":     { "liftForce": 40,  "rollRate": 0.5, "drag": 1.5, "maneuverability": 30, "hardpoints": 4 },
+      "phantom":   { "liftForce": 60,  "rollRate": 1.0, "drag": 0.5, "maneuverability": 75, "stealthBonus": 0.15 },
+      "viper":     { "liftForce": 85,  "rollRate": 1.6, "drag": 0.7, "maneuverability": 95 },
+      "mantis":    { "liftForce": 75,  "rollRate": 1.3, "drag": 0.9, "maneuverability": 70 },
+      "centurion": { "liftForce": 55,  "rollRate": 0.8, "drag": 1.0, "maneuverability": 55, "hardpoints": 2 },
+      "nova":      { "liftForce": 90,  "rollRate": 1.4, "drag": 0.4, "maneuverability": 85 },
+      "kraken":    { "liftForce": 65,  "rollRate": 0.9, "drag": 1.2, "maneuverability": 50, "grabRange": 100 },
+      "valkyrie":  { "liftForce": 80,  "rollRate": 1.3, "drag": 0.6, "maneuverability": 82 },
+      "golem":     { "liftForce": 35,  "rollRate": 0.4, "drag": 1.8, "maneuverability": 20, "cargoCapacity": 50 }
+    },
+    "engine_main": {
+      "falcon":    { "thrust": 75,  "maxSpeed": 320, "acceleration": 80,  "fuelEfficiency": 70 },
+      "titan":     { "thrust": 120, "maxSpeed": 180, "acceleration": 30,  "fuelEfficiency": 40 },
+      "phantom":   { "thrust": 65,  "maxSpeed": 290, "acceleration": 70,  "fuelEfficiency": 80, "heatSignature": 0.3 },
+      "viper":     { "thrust": 95,  "maxSpeed": 420, "acceleration": 100, "fuelEfficiency": 50 },
+      "mantis":    { "thrust": 70,  "maxSpeed": 280, "acceleration": 65,  "fuelEfficiency": 90, "bioRecharge": true },
+      "centurion": { "thrust": 85,  "maxSpeed": 250, "acceleration": 55,  "fuelEfficiency": 65 },
+      "nova":      { "thrust": 90,  "maxSpeed": 380, "acceleration": 85,  "fuelEfficiency": 30, "energyDrain": 2.0 },
+      "kraken":    { "thrust": 80,  "maxSpeed": 260, "acceleration": 50,  "fuelEfficiency": 55, "voidShift": true },
+      "valkyrie":  { "thrust": 78,  "maxSpeed": 340, "acceleration": 75,  "fuelEfficiency": 72 },
+      "golem":     { "thrust": 130, "maxSpeed": 160, "acceleration": 20,  "fuelEfficiency": 35 }
+    },
+    "engine_aux": {
+      "falcon":    { "boostThrust": 40,  "boostDuration": 3.0, "cooldown": 8 },
+      "titan":     { "boostThrust": 60,  "boostDuration": 5.0, "cooldown": 15 },
+      "phantom":   { "boostThrust": 35,  "boostDuration": 4.0, "cooldown": 6, "silentBoost": true },
+      "viper":     { "boostThrust": 80,  "boostDuration": 2.0, "cooldown": 5 },
+      "mantis":    { "boostThrust": 30,  "boostDuration": 6.0, "cooldown": 10, "bioRecharge": true },
+      "centurion": { "boostThrust": 50,  "boostDuration": 4.0, "cooldown": 10 },
+      "nova":      { "boostThrust": 70,  "boostDuration": 2.5, "cooldown": 7, "energyBurst": true },
+      "kraken":    { "boostThrust": 45,  "boostDuration": 3.5, "cooldown": 12, "phaseShift": true },
+      "valkyrie":  { "boostThrust": 42,  "boostDuration": 3.5, "cooldown": 8 },
+      "golem":     { "boostThrust": 65,  "boostDuration": 6.0, "cooldown": 20 }
+    },
+    "weapon_primary": {
+      "falcon":    { "damage": 25,  "fireRate": 5.0,  "range": 400,  "projectileSpeed": 600, "type": "laser", "energyCost": 8 },
+      "titan":     { "damage": 80,  "fireRate": 1.0,  "range": 800,  "projectileSpeed": 900, "type": "railgun", "energyCost": 30 },
+      "phantom":   { "damage": 45,  "fireRate": 2.0,  "range": 600,  "projectileSpeed": 800, "type": "sniper", "energyCost": 15 },
+      "viper":     { "damage": 18,  "fireRate": 8.0,  "range": 350,  "projectileSpeed": 700, "type": "pulse", "energyCost": 5 },
+      "mantis":    { "damage": 35,  "fireRate": 3.0,  "range": 450,  "projectileSpeed": 500, "type": "acid", "energyCost": 10, "dotDamage": 5 },
+      "centurion": { "damage": 30,  "fireRate": 6.0,  "range": 500,  "projectileSpeed": 650, "type": "gatling", "energyCost": 7 },
+      "nova":      { "damage": 60,  "fireRate": 2.5,  "range": 550,  "projectileSpeed": 1000,"type": "beam", "energyCost": 25 },
+      "kraken":    { "damage": 40,  "fireRate": 3.5,  "range": 500,  "projectileSpeed": 550, "type": "plasma", "energyCost": 12, "splashRadius": 30 },
+      "valkyrie":  { "damage": 50,  "fireRate": 2.0,  "range": 600,  "projectileSpeed": 750, "type": "lance", "energyCost": 18 },
+      "golem":     { "damage": 55,  "fireRate": 1.5,  "range": 700,  "projectileSpeed": 400, "type": "mining_laser", "energyCost": 20 }
+    },
+    "weapon_secondary": {
+      "falcon":    { "damage": 10, "fireRate": 10.0, "range": 300, "type": "machinegun", "ammo": 500 },
+      "titan":     { "damage": 30, "fireRate": 2.0,  "range": 600, "type": "missile", "ammo": 24, "tracking": true },
+      "phantom":   { "damage": 15, "fireRate": 4.0,  "range": 350, "type": "hidden_turret", "ammo": 200, "autoTarget": true },
+      "viper":     { "damage": 8,  "fireRate": 12.0, "range": 250, "type": "point_defense", "ammo": 800 },
+      "mantis":    { "damage": 20, "fireRate": 3.0,  "range": 300, "type": "stinger", "ammo": 100, "poison": true },
+      "centurion": { "damage": 22, "fireRate": 5.0,  "range": 400, "type": "flak", "ammo": 300, "aoeRadius": 20 },
+      "nova":      { "damage": 15, "fireRate": 7.0,  "range": 350, "type": "pulse_emitter", "ammo": 999, "energyBased": true },
+      "kraken":    { "damage": 18, "fireRate": 4.0,  "range": 250, "type": "spore", "ammo": 150, "slowEffect": 0.3 },
+      "valkyrie":  { "damage": 12, "fireRate": 6.0,  "range": 350, "type": "light_turret", "ammo": 400 },
+      "golem":     { "damage": 25, "fireRate": 3.0,  "range": 300, "type": "rivet_gun", "ammo": 200, "stunChance": 0.1 }
+    },
+    "shield": {
+      "falcon":    { "shieldHP": 50,  "rechargeRate": 5,  "rechargeDelay": 3.0 },
+      "titan":     { "shieldHP": 30,  "rechargeRate": 2,  "rechargeDelay": 5.0, "extraArmor": 5 },
+      "phantom":   { "shieldHP": 40,  "rechargeRate": 4,  "rechargeDelay": 2.5, "cloakDuration": 5.0 },
+      "viper":     { "shieldHP": 35,  "rechargeRate": 8,  "rechargeDelay": 2.0 },
+      "mantis":    { "shieldHP": 60,  "rechargeRate": 6,  "rechargeDelay": 3.5, "hpRegen": 3 },
+      "centurion": { "shieldHP": 70,  "rechargeRate": 4,  "rechargeDelay": 4.0 },
+      "nova":      { "shieldHP": 100, "rechargeRate": 10, "rechargeDelay": 1.5, "energyAbsorb": 0.2 },
+      "kraken":    { "shieldHP": 80,  "rechargeRate": 3,  "rechargeDelay": 4.5, "damageReflect": 0.1 },
+      "valkyrie":  { "shieldHP": 65,  "rechargeRate": 6,  "rechargeDelay": 3.0 },
+      "golem":     { "shieldHP": 20,  "rechargeRate": 1,  "rechargeDelay": 6.0, "extraArmor": 8 }
+    },
+    "tail": {
+      "falcon":    { "yawRate": 1.1, "stability": 75, "pitchBonus": 1.1 },
+      "titan":     { "yawRate": 0.5, "stability": 95, "pitchBonus": 0.7 },
+      "phantom":   { "yawRate": 0.9, "stability": 80, "pitchBonus": 1.0, "stealthBonus": 0.1 },
+      "viper":     { "yawRate": 1.5, "stability": 60, "pitchBonus": 1.3 },
+      "mantis":    { "yawRate": 1.0, "stability": 65, "pitchBonus": 1.0 },
+      "centurion": { "yawRate": 0.8, "stability": 85, "pitchBonus": 0.9 },
+      "nova":      { "yawRate": 1.3, "stability": 55, "pitchBonus": 1.2 },
+      "kraken":    { "yawRate": 0.7, "stability": 70, "pitchBonus": 0.8 },
+      "valkyrie":  { "yawRate": 1.2, "stability": 78, "pitchBonus": 1.1 },
+      "golem":     { "yawRate": 0.4, "stability": 98, "pitchBonus": 0.5 }
+    }
+  }
+}

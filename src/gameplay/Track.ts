@@ -9,36 +9,58 @@ import type { Obstacle, ObstacleFactory } from './obstacles/types.ts';
  * inside ±LANE_HALF_X / ±LANE_HALF_Y, so the player can maneuver inside the
  * lane without grazing walls.
  *
- * Pool behavior: the 140 obstacles form a single continuous **chain** along
- * Z. New obstacles never teleport into an arbitrary random slot around the
- * ship — they always land at the chain's current far end (tail for -Z,
- * head for +Z) with a bounded random gap. That guarantees there is never
- * an empty stretch between recycled obstacles and the existing ones, and
- * the stream reads as one continuous infinite flow regardless of where in
- * the corridor the player happens to be.
+ * ## Modular-loop placement
+ *
+ * Each obstacle owns fixed canonical (x, y, z) coords inside a closed
+ * axial loop of length `LOOP_LENGTH`. Every frame (when not being
+ * impulsed by a crash) the obstacle is placed at the loop image of its
+ * canonical Z nearest the ship's projection:
+ *
+ *     wrapK    = round((shipZ - ob.loopZ) / LOOP_LENGTH)
+ *     mesh.z   = ob.loopZ + wrapK * LOOP_LENGTH
+ *
+ * This gives a stable, uniformly-spaced window of obstacles that always
+ * brackets the ship on both sides regardless of entry Z, flight direction,
+ * or whether the flow is being viewed from inside or from free space.
+ *
+ * Post-crash: when the ship impacts an obstacle, we let physics drive
+ * the mesh freely for `impulseRemaining` seconds. Afterwards we mark
+ * the obstacle as "settled" at the current wrap iteration and keep it
+ * there until the ship advances to a new loop iteration — at which
+ * point we snap it back to its canonical spot in the fresh iteration.
+ * The result reads as the wreckage being left behind naturally rather
+ * than teleporting on top of the player.
  */
 
-const POOL_SIZE = 140;
-// Narrow obstacle lane: where obstacles actually spawn. Lateral half-width
-// bumped 20% so obstacles spread further off-axis, making the corridor feel
-// busier at the edges and giving the player more horizontal dodging space
-// to read.
-export const LANE_HALF_X = 16.8;
+const POOL_SIZE = 200;
+/** Core lane half-width — obstacles here sit right in the player's main
+ *  flight path. Widened slightly from 16.8 so the core corridor has a
+ *  touch more room to dodge and a denser central pack of obstacles. */
+export const LANE_HALF_X = 19;
 export const LANE_HALF_Y = 10;
 // Circular corridor boundary: the cylindrical membrane the player must
 // cross to leave the Egyptian world. Lateral decorations and the flow
 // haze sit just outside this radius, so from inside the obstacle lane
 // you cannot see the boundary at all.
 export const CORRIDOR_RADIUS = 50;
-// Slightly tighter axial spacing than the 16.1 baseline so the corridor
-// reads a touch denser without slipping back to the old too-packed tuning.
-const MIN_SPACING_Z = 14.5;
-// Natural half-length of the chain for POOL_SIZE/2 obstacles per side at the
-// spacing above. Recycle threshold sits just past this so obstacles are only
-// moved when they've genuinely drifted outside the active window, never
-// mid-chain. Buffer accounts for jitter from the random-gap distribution.
-const CHAIN_HALF_LENGTH = (POOL_SIZE / 2) * (MIN_SPACING_Z * 1.2);
-const RECYCLE_DIST = CHAIN_HALF_LENGTH + 80;
+/** Flanking band: obstacles beyond the core lane fill the sides of the
+ *  corridor so the player sees obstacles rushing past in their peripheral
+ *  vision, not just straight ahead. Well inside CORRIDOR_RADIUS = 50 so
+ *  they never overlap the outer boundary glow. */
+const LANE_FLANK_MIN = LANE_HALF_X;
+const LANE_FLANK_MAX = 34;
+/** Fraction of the pool that lives in the flanking band. The rest stays
+ *  in the core lane so gameplay difficulty is still driven by the central
+ *  column. 0.30 = roughly 60 of the 200 obstacles go out to the flanks. */
+const FLANK_FRACTION = 0.30;
+// Tighter axial cadence than the 16-unit baseline so the corridor reads as
+// a proper gauntlet at the new, higher ship speeds instead of an empty tube.
+const NOMINAL_SPACING = 13.0;
+/** Length of one axial loop. POOL_SIZE obstacles at NOMINAL_SPACING ≈ 2240 u. */
+const LOOP_LENGTH = POOL_SIZE * NOMINAL_SPACING;
+const HALF_LOOP = LOOP_LENGTH / 2;
+/** Per-obstacle jitter so the loop doesn't read as perfectly metered. */
+const SPACING_JITTER = NOMINAL_SPACING * 0.35;
 
 /**
  * Y-slot bands that rotate across the pool index — guarantees every altitude
@@ -64,9 +86,24 @@ function rand(a: number, b: number): number {
   return a + Math.random() * (b - a);
 }
 
+/**
+ * Per-obstacle loop state. Held in a parallel array so the public
+ * `Obstacle` interface stays unchanged for external consumers (collision,
+ * HUD distance-to-next, etc.).
+ */
+interface LoopSlot {
+  loopX: number;
+  loopY: number;
+  loopZ: number;
+  /** Wrap iteration the obstacle is currently settled in after a crash
+   *  impulse. NEGATIVE_INFINITY means "not displaced; track the ship". */
+  settleWrapK: number;
+}
+
 export class Track {
   readonly group = new Group();
   private obstacles: Obstacle[] = [];
+  private slots: LoopSlot[] = [];
   private factories: ObstacleFactory[] = [];
   /** Map from obstacle.type → 'tall' | 'wide' for impact-bias lookup. */
   private shapes: Map<string, 'tall' | 'wide'> = new Map();
@@ -75,13 +112,44 @@ export class Track {
     if (this.factories.length === 0) {
       throw new Error('Track.init() called before setFactories()');
     }
+    // Distribute POOL_SIZE obstacles evenly across one loop with per-obstacle
+    // jitter + Y-band rotation so altitudes are populated uniformly. Each
+    // obstacle keeps its canonical (x, y, z) forever; per-frame wrap math
+    // in update() places it in the loop image nearest the ship.
+    // Every Nth obstacle goes into the flanking band. With FLANK_FRACTION=0.30
+    // and a prime-ish stride (every ~3.33), the flanks and the core lane
+    // interleave cleanly along the axial axis instead of clumping.
+    const flankStride = Math.max(2, Math.round(1 / FLANK_FRACTION));
     for (let i = 0; i < POOL_SIZE; i++) {
       const f = this.factories[i % this.factories.length];
       const ob = f();
-      this.group.add(ob.mesh);
+      const baseZ = (i + 0.5) * NOMINAL_SPACING - HALF_LOOP;
+      const loopZ = baseZ + rand(-SPACING_JITTER, SPACING_JITTER);
+      const band = Y_BANDS[i % Y_BANDS.length];
+      const loopY = rand(band[0], band[1]);
+      const isFlank = i % flankStride === 0;
+      let loopX: number;
+      if (isFlank) {
+        // Flanking obstacle: push it out into the [LANE_FLANK_MIN, LANE_FLANK_MAX]
+        // band on one random side. These sit in the player's peripheral
+        // vision — visible hazards they don't usually collide with unless
+        // they drift wide, but they fill the corridor with motion.
+        const side = Math.random() < 0.5 ? -1 : 1;
+        loopX = laneX(loopZ) + side * rand(LANE_FLANK_MIN, LANE_FLANK_MAX);
+      } else {
+        loopX = laneX(loopZ) + rand(-LANE_HALF_X, LANE_HALF_X);
+      }
+      ob.mesh.position.set(loopX, loopY, loopZ);
+      this.randomizeRotation(ob);
       this.obstacles.push(ob);
+      this.slots.push({
+        loopX,
+        loopY,
+        loopZ,
+        settleWrapK: Number.NEGATIVE_INFINITY,
+      });
+      this.group.add(ob.mesh);
     }
-    this.layOutChainAround(0);
   }
 
   get all(): readonly Obstacle[] {
@@ -94,90 +162,6 @@ export class Track {
       rand(-Math.PI, Math.PI),
       rand(-Math.PI, Math.PI),
     );
-  }
-
-  /**
-   * Place the obstacle at the given Z with a random XY inside the lane band.
-   * Clears any leftover impact physics so recycled/reseeded obstacles never
-   * keep spinning or drifting from their previous life.
-   */
-  private placeAt(ob: Obstacle, z: number): void {
-    const cx = laneX(z);
-    const band = Y_BANDS[Math.floor(Math.random() * Y_BANDS.length)];
-    ob.mesh.position.set(
-      cx + rand(-LANE_HALF_X, LANE_HALF_X),
-      rand(band[0], band[1]),
-      z,
-    );
-    this.randomizeRotation(ob);
-    ob.spin.x = 0;
-    ob.spin.y = 0;
-    ob.spin.z = 0;
-    ob.impulseX = 0;
-    ob.impulseY = 0;
-    ob.impulseZ = 0;
-    ob.impulseRemaining = 0;
-  }
-
-  /**
-   * Seed the whole pool as a single continuous chain centred on `centerZ`.
-   * Alternates sides so the chain grows symmetrically forward and backward.
-   * The first obstacle on each side sits half a gap from centerZ so that
-   * the gap straddling the midpoint matches the rest of the chain — without
-   * this trick, the naive "walk both cursors from the centre" approach
-   * leaves a visible double-gap at the midpoint.
-   */
-  private layOutChainAround(centerZ: number): void {
-    let tailZ = centerZ; // running far-ahead cursor (-Z)
-    let headZ = centerZ; // running far-behind cursor (+Z)
-    let firstAhead = true;
-    let firstBehind = true;
-    for (let i = 0; i < this.obstacles.length; i++) {
-      const gap = rand(MIN_SPACING_Z, MIN_SPACING_Z * 1.4);
-      let z: number;
-      if (i % 2 === 0) {
-        tailZ -= firstAhead ? gap * 0.5 : gap;
-        firstAhead = false;
-        z = tailZ;
-      } else {
-        headZ += firstBehind ? gap * 0.5 : gap;
-        firstBehind = false;
-        z = headZ;
-      }
-      this.placeAt(this.obstacles[i], z);
-    }
-  }
-
-  /**
-   * Scan the pool (excluding `self`) for its current Z extremes. Cheap at
-   * N=140 and avoids stale-cache bugs when recycling runs mid-frame.
-   */
-  private chainExtremes(self: Obstacle): { minZ: number; maxZ: number } {
-    let minZ = Infinity;
-    let maxZ = -Infinity;
-    for (const o of this.obstacles) {
-      if (o === self) continue;
-      const z = o.mesh.position.z;
-      if (z < minZ) minZ = z;
-      if (z > maxZ) maxZ = z;
-    }
-    return { minZ, maxZ };
-  }
-
-  /**
-   * Re-place `ob` at the chain's current far end on the requested side,
-   * one random gap past the existing farthest obstacle. This keeps the
-   * stream continuous — there is no empty band between the recycled
-   * obstacle and the rest of the pool.
-   *
-   *   side = -1 → extend the ahead (-Z) end of the chain.
-   *   side = +1 → extend the behind (+Z) end of the chain.
-   */
-  private recycle(ob: Obstacle, side: 1 | -1): void {
-    const { minZ, maxZ } = this.chainExtremes(ob);
-    const gap = rand(MIN_SPACING_Z, MIN_SPACING_Z * 1.4);
-    const z = side === -1 ? minZ - gap : maxZ + gap;
-    this.placeAt(ob, z);
   }
 
   /**
@@ -224,7 +208,15 @@ export class Track {
   }
 
   update(shipZ: number, dt = 0): void {
-    for (const ob of this.obstacles) {
+    for (let i = 0; i < this.obstacles.length; i++) {
+      const ob = this.obstacles[i];
+      const slot = this.slots[i];
+
+      // -------- Impulse physics --------
+      // While the obstacle is flying from a crash, let physics integrate
+      // freely; no wrap math. We also mark the wrap iteration it ends up
+      // in so the post-impulse "settled" state can be cleaned up when
+      // the ship advances to a new loop iteration.
       if (ob.impulseRemaining > 0) {
         ob.mesh.rotation.x += ob.spin.x * dt;
         ob.mesh.rotation.y += ob.spin.y * dt;
@@ -243,31 +235,54 @@ export class Track {
         ob.spin.y *= spinDecay;
         ob.spin.z *= spinDecay;
         ob.impulseRemaining = Math.max(0, ob.impulseRemaining - dt);
+        if (ob.impulseRemaining <= 0) {
+          // Mark where this obstacle settled so we leave it behind until
+          // the ship has moved to a new loop iteration.
+          slot.settleWrapK = Math.round(
+            (shipZ - slot.loopZ) / LOOP_LENGTH,
+          );
+        }
+        continue;
       }
-      const dz = ob.mesh.position.z - shipZ;
-      if (dz > RECYCLE_DIST) {
-        // Too far behind — wrap to the far-ahead end of the chain.
-        this.recycle(ob, -1);
-      } else if (dz < -RECYCLE_DIST) {
-        // Too far ahead — wrap to the far-behind end of the chain.
-        this.recycle(ob, 1);
+
+      // -------- Settled wreckage --------
+      // Freshly-crashed obstacle stays where physics left it until the
+      // ship advances to a new loop iteration. When wrapK changes we
+      // snap the obstacle back to its canonical spot in the new iteration
+      // — by then the ship is thousands of units away so the teleport is
+      // off-screen.
+      if (slot.settleWrapK !== Number.NEGATIVE_INFINITY) {
+        const currentWrapK = Math.round(
+          (shipZ - slot.loopZ) / LOOP_LENGTH,
+        );
+        if (currentWrapK !== slot.settleWrapK) {
+          slot.settleWrapK = Number.NEGATIVE_INFINITY;
+          ob.mesh.position.set(
+            slot.loopX,
+            slot.loopY,
+            slot.loopZ + currentWrapK * LOOP_LENGTH,
+          );
+          this.randomizeRotation(ob);
+        }
+        continue;
       }
+
+      // -------- Modular loop wrap --------
+      // Closed-form: obstacle sits at the loop image of its canonical Z
+      // nearest to the ship's axial projection. No head/tail cursors, no
+      // recycling events — the window always brackets the ship.
+      const wrapK = Math.round((shipZ - slot.loopZ) / LOOP_LENGTH);
+      ob.mesh.position.set(
+        slot.loopX,
+        slot.loopY,
+        slot.loopZ + wrapK * LOOP_LENGTH,
+      );
     }
   }
 
   setFactories(factories: ObstacleFactory[], shapes: Map<string, 'tall' | 'wide'>): void {
     this.factories = factories;
     this.shapes = shapes;
-  }
-
-  /**
-   * Rebuild the whole chain around the given local-Z. Used on flow entry so
-   * the player lands inside a populated corridor regardless of their axial
-   * offset — and so the chain's centre is where they actually are rather
-   * than the initial z=0 seed.
-   */
-  recenter(shipZ: number): void {
-    this.layOutChainAround(shipZ);
   }
 
   distanceToNext(shipPos: Vector3): number {

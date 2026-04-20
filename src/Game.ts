@@ -4,7 +4,7 @@ import {
   DirectionalLight,
   EquirectangularReflectionMapping,
   Fog,
-  NoToneMapping,
+  type Object3D,
   PerspectiveCamera,
   PMREMGenerator,
   Scene,
@@ -23,15 +23,25 @@ import {
   ToneMappingMode,
   VignetteEffect,
 } from 'postprocessing';
+import { getAudio } from './core/Audio.ts';
 import { getInput } from './core/Input.ts';
-import type { Era } from './eras/eras.ts';
+import { SaveManager, type SaveData } from './core/SaveManager.ts';
+import type { Era, EraId } from './eras/eras.ts';
 import { ERA_CONTENT } from './eras/eraContent.ts';
 import { getEnvHDR, preloadAssets } from './gameplay/Assets.ts';
 import { sphereVsAabb } from './gameplay/Collision.ts';
 import type { Flow } from './gameplay/Flow.ts';
 import { FlowManager } from './gameplay/FlowManager.ts';
 import type { Obstacle } from './gameplay/obstacles/types.ts';
-import { Ship } from './gameplay/Ship.ts';
+import { DEFAULT_SHIP_STATS, Ship } from './gameplay/Ship.ts';
+import {
+  parsePortalQuery,
+  PortalSystem,
+  type PortalQuery,
+  type ShipSnapshot,
+} from './portal/PortalSystem.ts';
+import { assembleShip } from './shipbuilder/ShipAssembly.ts';
+import type { ShipBuilderResult } from './shipbuilder/ShipBuilder.ts';
 import { AstragaloiPuzzle } from './puzzles/Astragaloi.ts';
 import { BooleanGatesPuzzle } from './puzzles/BooleanGates.ts';
 import { CardanoDicePuzzle } from './puzzles/CardanoDice.ts';
@@ -54,6 +64,7 @@ import { SorobanPuzzle } from './puzzles/Soroban.ts';
 import { SugorokuPuzzle } from './puzzles/Sugoroku.ts';
 import { StomachionPuzzle } from './puzzles/Stomachion.ts';
 import { CelestialGods } from './render/CelestialGods.ts';
+import { ImpactSparks } from './render/ImpactSparks.ts';
 import { Skybox } from './render/Skybox.ts';
 import { Hud } from './ui/hud.ts';
 
@@ -66,10 +77,18 @@ const SHIP_COLLIDER_RADIUS = 1.35;
 const INVULN_AFTER_CRASH = 1.0;
 const ORB_TARGET = 10;
 const CRASH_SHAKE_DURATION = 0.55;
-const CRASH_SHAKE_MAX = 0.9;
+const CRASH_SHAKE_MAX = 1.2;
+const CRASH_FREEZE_DURATION = 0.06;
 const CRASH_FLASH_DURATION = 0.18;
-const IMPACTS_PER_ANKH = 2;
-const MAX_HALVES = IMPACTS_PER_ANKH * 2;
+/**
+ * Base damage per corridor obstacle impact. Armor subtracts from this (floored
+ * to CRASH_MIN_DAMAGE so heavy Golem armor doesn't make the ship immortal),
+ * then the remainder is applied to shield first, then HP.
+ */
+const CRASH_BASE_DAMAGE = 30;
+const CRASH_MIN_DAMAGE = 6;
+/** HP threshold at which we reset HP and deduct an ankh (the old death sub). */
+const HP_RESET_DEDUCT_ANKH = true;
 
 export class Game {
   readonly renderer: WebGLRenderer;
@@ -88,6 +107,10 @@ export class Game {
   private rim: DirectionalLight;
   private lastTs = performance.now();
   private _smoothCamPos = new Vector3();
+  /** Tracks free-space state across frames so we can snap the camera on
+   *  the inside↔outside boundary instead of letting it lerp-chase the
+   *  teleported ship position (which produced visible jerk). */
+  private _wasFree = false;
   private readonly _scratchA = new Vector3();
   private readonly _scratchB = new Vector3();
   private readonly _scratchC = new Vector3();
@@ -100,24 +123,82 @@ export class Game {
   private won = false;
   private shakeRemaining = 0;
   private flashRemaining = 0;
+  private freezeRemaining = 0;
   private flashEl: HTMLDivElement | null = null;
+  private sparks!: ImpactSparks;
   private puzzle: Puzzle | null = null;
   private puzzleFlow: Flow | null = null;
   private pointerHandler: ((ev: PointerEvent) => void) | null = null;
-  private impactsSinceAnkh = 0;
   private lastHudFlow: Flow | null = null;
 
-  constructor(canvas: HTMLCanvasElement) {
-    this.renderer = new WebGLRenderer({
-      canvas,
-      antialias: false,
-      powerPreference: 'high-performance',
-      stencil: false,
-      depth: true,
-    });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
-    this.renderer.toneMapping = NoToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
+  // --- Ship-builder-driven health / shield / boost state ---
+  private readonly builderResult: ShipBuilderResult | null;
+  private hp: number;
+  private maxHp: number;
+  private shield: number;
+  private maxShield: number;
+  private shieldRechargeTimer = 0; // counts down to 0 after any damage tick
+  /** Reference to the shield bubble mesh inside the assembled ship group.
+   *  Toggled visible/hidden every frame based on current shield energy so
+   *  the bubble fades out when the shield is depleted and returns when it
+   *  recharges. Null for the fallback ship (no shield slot). */
+  private shieldMesh: Object3D | null = null;
+  /** Normalised 0..1 boost energy; drains while boost held, refills on release. */
+  private boostEnergy = 1;
+  /** Edge-detect boost key so we only fire the ignition SFX on press, not
+   *  on every held frame (otherwise the boost sound would loop at 60Hz). */
+  private _wasBoosting = false;
+
+  // --- Auto-save timer (every 30s in frame loop) ---
+  private autoSaveTimer = 0;
+  private static readonly AUTO_SAVE_INTERVAL = 30;
+
+  // --- Vibe Jam 2026 portal webring ---
+  private readonly portalQuery: PortalQuery;
+  private readonly portals: PortalSystem;
+  /** Hex color (no `#`) forwarded to the jam on exit. */
+  private playerColor: string;
+  /** Player handle forwarded on exit — inbound from ref site or 'voyager'. */
+  private playerUsername: string;
+
+  constructor(
+    canvas: HTMLCanvasElement,
+    renderer: WebGLRenderer,
+    builderResult: ShipBuilderResult | null = null,
+    portalQuery: PortalQuery = parsePortalQuery(),
+    loadedSave?: SaveData,
+  ) {
+    // Renderer comes from main.ts so the builder and gameplay share one GL
+    // context. The canvas arg is the same element attached to the renderer —
+    // we keep it for parity with the previous API.
+    void canvas;
+    this.renderer = renderer;
+    this.builderResult = builderResult;
+
+    // Derive HP/shield caps from the loadout (or the default fallback stats).
+    const stats = builderResult?.stats ?? DEFAULT_SHIP_STATS;
+    this.maxHp = stats.maxHp;
+    this.hp = stats.maxHp;
+    this.maxShield = stats.maxShield;
+    this.shield = stats.maxShield;
+
+    // Restore persisted HP/shield/boost when resuming from a save.
+    if (loadedSave) {
+      this.hp = Math.max(1, Math.min(this.maxHp, loadedSave.hp));
+      this.shield = Math.max(0, Math.min(this.maxShield, loadedSave.shield));
+      this.boostEnergy = Math.max(0, Math.min(1, loadedSave.boostEnergy));
+    }
+
+    // Apply inbound portal state (clamped): a friend arriving at half HP
+    // should keep that damage so the webring feels continuous. Color &
+    // username carry through so the exit URL can forward them onward.
+    this.portalQuery = portalQuery;
+    if (portalQuery.fromPortal && portalQuery.hp != null) {
+      this.hp = Math.max(1, Math.min(this.maxHp, portalQuery.hp));
+    }
+    this.playerColor = normaliseColorHex(portalQuery.color) ?? '5fc8ff';
+    this.playerUsername = portalQuery.username ?? 'voyager';
+    this.portals = new PortalSystem(portalQuery);
 
     this.camera = new PerspectiveCamera(
       70,
@@ -131,9 +212,20 @@ export class Game {
         if (flow === this.flowManager.activeFlow) {
           this.hud.updateOrbCount(collected, target);
         }
+        // Bright two-tone chime on every orb grab — matches the visual
+        // spark burst and reinforces the loop without fighting the score.
+        getAudio().playPickup();
       },
       onEraComplete: (flow) => this.onEraComplete(flow),
     });
+
+    // Restore per-era puzzle progress from saved data.
+    if (loadedSave) {
+      for (const flow of this.flowManager.flows) {
+        const saved = loadedSave.puzzleStages[flow.era.id as EraId];
+        if (saved != null) flow.puzzleStage = saved;
+      }
+    }
 
     // HUD initially displays Egypt (the anchor flow).
     this.currentHudEra = this.flowManager.flows[0].era;
@@ -146,7 +238,11 @@ export class Game {
     this.celestial = new CelestialGods();
     this.scene.add(this.celestial.group);
 
-    this.ship = new Ship();
+    // Ship model is assembled asynchronously in start() once the GLB parts
+    // for this loadout have loaded (they're already cached by the builder
+    // prefetch). The Ship instance exists synchronously so `this.ship` is
+    // usable from HUD wiring; the model is attached later before `init()`.
+    this.ship = new Ship(stats);
 
     this.ambient = new AmbientLight(0xffffff, 0.3);
     this.scene.add(this.ambient);
@@ -169,7 +265,9 @@ export class Game {
     );
     this.hud.setOrbTarget(ORB_TARGET);
     this.hud.setOrbIcon(ERA_CONTENT[this.currentHudEra.id].collectible.icon);
-    this.hud.updateHearts(this.heartHalves(), MAX_HALVES);
+    this.hud.setWeapons(stats.primaryType, stats.secondaryType);
+    this.hud.updateHpShield(this.hp, this.maxHp, this.shield, this.maxShield);
+    this.hud.setBoostReady(1);
 
     // Post-processing stack.
     this.composer = new EffectComposer(this.renderer);
@@ -223,12 +321,87 @@ export class Game {
     this.scene.environmentIntensity = 0.55;
     hdr.dispose();
     pmrem.dispose();
+
+    // If we have a builder result, assemble the modular ship before init so
+    // the player sees the exact loadout they configured. The GLB parts are
+    // already in the ShipAssembly cache from the builder prefetch, so this
+    // resolves in one frame with no network.
+    if (this.builderResult) {
+      const assembly = await assembleShip(this.builderResult.config);
+      // Pass the engine class + slot so Ship.init() can mount a per-class
+      // propulsion flame at the nozzle. Different engine loadouts get
+      // visibly different thruster colors, lengths, and pulse rhythms —
+      // see Thruster.ts ENGINE_PALETTES for the per-class config.
+      this.ship.useAssembledModel(
+        assembly.group,
+        this.builderResult.config.engine_main,
+        assembly.slots.engine_main,
+      );
+      // Capture the shield bubble so we can fade it out when the energy
+      // pool drops to zero and fade it back when it recharges.
+      this.shieldMesh = assembly.slots.shield ?? null;
+    }
+
     this.ship.init();
     this.celestial.init();
     this.flowManager.init(this.scene);
+
+    // Free-space spawn: park the player OUTSIDE Egypt's corridor at a
+    // radial distance that takes ≥5 seconds to cross even on the fastest
+    // engine (viper's maxThrustSpeed ~85 u/s → 400 units / 85 ≈ 4.7s, so
+    // radial = 500 gives boundary distance = 450 → ~5.3s at top speed,
+    // ~10s on the slow golem). The ship's nose is oriented at Egypt's
+    // origin so the corridor mouth reads as "ahead and down" — the
+    // player's first input naturally pulls them into the tube.
+    this.ship.spawn(new Vector3(0, 500, 200), new Vector3(0, 0, 0));
+
+    // Re-seat the camera smoother at the new spawn so the first follow
+    // frame doesn't visibly trail from world origin to (0, 500, 200).
+    this._smoothCamPos.copy(this.ship.group.position).add(CAMERA_OFFSET);
+    this.camera.position.copy(this._smoothCamPos);
+    this.camera.lookAt(this.ship.group.position);
+
+    // Apply inbound portal velocity/rotation now that the ship is real.
+    this.applyInboundPortalState();
+
+    // Mount the Vibe Jam portal(s). Visibility of the green exit torus is
+    // controlled by the SHOW_EXIT_PORTAL feature flag in PortalSystem.ts —
+    // inbound handling and the return portal stay active regardless.
+    this.portals.init(this.scene);
+
     this.lastTs = performance.now();
     requestAnimationFrame(this.frame);
   }
+
+  /**
+   * Copy incoming velocity + rotation from the portal query onto the Ship.
+   * Called once after `ship.init()` so we overwrite the ship's default
+   * resting pose with whatever the referring site handed us.
+   */
+  private applyInboundPortalState(): void {
+    const q = this.portalQuery;
+    if (!q.fromPortal) return;
+    if (q.velocity) {
+      this.ship.velocity.copy(q.velocity);
+    }
+    if (q.rotation) {
+      this.ship.group.rotation.set(q.rotation.x, q.rotation.y, q.rotation.z);
+    }
+  }
+
+  /** Build the ship snapshot the PortalSystem forwards on exit. */
+  private snapshotShipState = (): ShipSnapshot => ({
+    position: this.ship.group.position,
+    velocity: this.ship.velocity,
+    rotation: new Vector3(
+      this.ship.group.rotation.x,
+      this.ship.group.rotation.y,
+      this.ship.group.rotation.z,
+    ),
+    hp: this.hp,
+    color: this.playerColor,
+    username: this.playerUsername,
+  });
 
   private handleResize = (): void => {
     const w = window.innerWidth;
@@ -254,14 +427,46 @@ export class Game {
     flow.track.hitImpact(hit, this._scratchLocalShip, localVel);
     this.ship.stun();
 
-    this.impactsSinceAnkh++;
-    if (this.impactsSinceAnkh >= IMPACTS_PER_ANKH) {
-      this.impactsSinceAnkh = 0;
-      if (flow.collectibles.losePickup()) {
-        this.hud.flashAnkhLoss();
+    // Damage model: base - armor (floored), applied to shield first, then HP.
+    const stats = this.builderResult?.stats ?? DEFAULT_SHIP_STATS;
+    let dmg = Math.max(CRASH_MIN_DAMAGE, CRASH_BASE_DAMAGE - stats.armor);
+    let shieldAbsorbed = false;
+    if (this.shield > 0) {
+      const absorbed = Math.min(this.shield, dmg);
+      this.shield -= absorbed;
+      dmg -= absorbed;
+      if (absorbed > 0) shieldAbsorbed = true;
+    }
+    if (dmg > 0) this.hp -= dmg;
+    // SFX reads the outcome: if the shield took any piece of the hit, fire
+    // the high-pitched zap; if damage bled through to HP, fire the heavier
+    // thump too. Both can play in the same frame (partial-absorb case) —
+    // that's musically correct for "shield dropped AND hull took damage".
+    if (shieldAbsorbed) getAudio().playShieldHit();
+    if (dmg > 0) getAudio().playCrash();
+    // Any damage pauses shield regen for its full delay.
+    this.shieldRechargeTimer = stats.shieldRechargeDelay;
+
+    if (this.hp <= 0) {
+      // Death: refill HP and zero the shield so the failure state keeps the
+      // existing "stay playing" loop instead of a hard game-over. The cost
+      // of dying is losing every collectible acquired in the current flow —
+      // a clean, legible penalty that resets era progress without kicking
+      // the player back to the menu.
+      this.hp = this.maxHp;
+      this.shield = 0;
+      if (HP_RESET_DEDUCT_ANKH) {
+        let lost = false;
+        // Drain the whole flow's collection counter. Each call to
+        // `losePickup()` ticks the count down by one and fires the HUD
+        // update event; we flash the loss indicator once at the end so the
+        // screen doesn't strobe N times for a multi-pickup purge.
+        while (flow.collectibles.losePickup()) lost = true;
+        if (lost) this.hud.flashAnkhLoss();
       }
     }
-    this.hud.updateHearts(this.heartHalves(), MAX_HALVES);
+    this.hud.updateHpShield(this.hp, this.maxHp, this.shield, this.maxShield);
+    this.hud.flashHit();
   }
 
   private readonly _fogInside = new Color();
@@ -278,8 +483,36 @@ export class Game {
     fog.far = 220 + outside * 30000;
   }
 
-  private heartHalves(): number {
-    return Math.max(0, (IMPACTS_PER_ANKH - this.impactsSinceAnkh) * 2);
+  /**
+   * Passive regen each frame: shield recharges after `shieldRechargeDelay`
+   * seconds of no-damage at `shieldRechargeRate` HP/s; hull slowly ticks
+   * back if the loadout has bio-regen (mantis hull / shield).
+   */
+  private regenerate(dt: number): void {
+    const stats = this.builderResult?.stats ?? DEFAULT_SHIP_STATS;
+    if (this.shieldRechargeTimer > 0) {
+      this.shieldRechargeTimer = Math.max(0, this.shieldRechargeTimer - dt);
+    } else if (this.shield < this.maxShield) {
+      this.shield = Math.min(
+        this.maxShield,
+        this.shield + stats.shieldRechargeRate * dt,
+      );
+    }
+    if (stats.hpRegen > 0 && this.hp < this.maxHp) {
+      this.hp = Math.min(this.maxHp, this.hp + stats.hpRegen * dt);
+    }
+  }
+
+  /** Update the boost-readiness bar (cosmetic drain + refill loop). */
+  private updateBoostEnergy(dt: number, boosting: boolean): void {
+    const stats = this.builderResult?.stats ?? DEFAULT_SHIP_STATS;
+    if (boosting) {
+      const drain = 1 / Math.max(0.5, stats.boostDuration);
+      this.boostEnergy = Math.max(0, this.boostEnergy - drain * dt);
+    } else {
+      const refill = 1 / Math.max(0.5, stats.boostCooldown);
+      this.boostEnergy = Math.min(1, this.boostEnergy + refill * dt);
+    }
   }
 
   private ensureFlashEl(): HTMLDivElement {
@@ -297,6 +530,10 @@ export class Game {
     if (this.puzzle) return; // already in a puzzle
     this.won = true;
     this.hud.showWin();
+    // Bright C-E-G fanfare tells the player the corridor is cleared before
+    // the puzzle overlay slides in — 1.4s later is enough breathing room
+    // for the arpeggio to finish without stepping on puzzle audio.
+    getAudio().playEraComplete();
     this.puzzleFlow = flow;
     setTimeout(() => this.startPuzzle(), 1400);
   }
@@ -317,6 +554,12 @@ export class Game {
     this.puzzle = p;
     p.init();
     this.scene.add(p.group);
+
+    // Let the player bail back to the galaxy map if the checkpoint is too
+    // tough or they just want to free-fly again. Abandoning does NOT
+    // advance puzzleStage, so the same puzzle will be waiting when they
+    // re-enter the corridor and collect 10 ankhs again.
+    this.hud.showExitButton(() => this.abandonPuzzle());
   }
 
   private buildPuzzleForEra(eraId: string, stage: 0 | 1 | 2): Puzzle {
@@ -477,8 +720,10 @@ export class Game {
     this.scene.remove(this.puzzle.group);
     this.puzzle.dispose();
     this.puzzle = null;
+    this.hud.hideExitButton();
 
     flow.puzzleStage = (flow.puzzleStage + 1) as 0 | 1 | 2;
+    this.saveProgress();
 
     if (flow.puzzleStage >= 2) {
       this.showEraComplete(flow);
@@ -491,13 +736,58 @@ export class Game {
     this.skybox.mesh.visible = true;
     this.celestial.group.visible = true;
     flow.resetCollectibles();
-    this.impactsSinceAnkh = 0;
-    this.hud.updateHearts(this.heartHalves(), MAX_HALVES);
+    // Full heal on checkpoint success, so the player starts the next
+    // stage at fighting strength rather than carrying forward damage.
+    this.hp = this.maxHp;
+    this.shield = this.maxShield;
+    this.shieldRechargeTimer = 0;
+    this.hud.updateHpShield(this.hp, this.maxHp, this.shield, this.maxShield);
     this.hud.updateOrbCount(0, ORB_TARGET);
     this.won = false;
     this.puzzleFlow = null;
     this._smoothCamPos.copy(this.ship.group.position).add(CAMERA_OFFSET);
     this.camera.position.copy(this._smoothCamPos);
+  }
+
+  /**
+   * Bail out of the active checkpoint puzzle WITHOUT solving it. Triggered
+   * by the HUD's "Torna alla mappa" button. The player is returned to the
+   * free-space view near Egypt (same spawn used at game start) and the
+   * flow's puzzleStage is NOT advanced — so the exact same checkpoint is
+   * waiting the next time they collect 10 ankhs in that corridor.
+   *
+   * Collectibles are reset too, because the flow already cleared them when
+   * the checkpoint fired; without the reset the player would re-enter the
+   * corridor and find it empty.
+   */
+  private abandonPuzzle(): void {
+    if (!this.puzzle || !this.puzzleFlow) return;
+    const flow = this.puzzleFlow;
+    this.scene.remove(this.puzzle.group);
+    this.puzzle.dispose();
+    this.puzzle = null;
+    this.hud.hideExitButton();
+
+    // Restore the world. puzzleStage is intentionally NOT incremented —
+    // abandoning is a bail-out, not a success.
+    this.ship.group.visible = true;
+    this.flowManager.setAllVisible(true);
+    this.skybox.mesh.visible = true;
+    this.celestial.group.visible = true;
+    flow.resetCollectibles();
+    this.hud.updateOrbCount(0, ORB_TARGET);
+    this.hud.hideWin();
+    this.won = false;
+    this.puzzleFlow = null;
+
+    // Drop the player back where the game starts — free space above Egypt,
+    // a few seconds' flight from the corridor entrance. Using ship.spawn()
+    // sets wasFree=true so the first frame doesn't snap them back into the
+    // corridor tube they were just inside.
+    this.ship.spawn(new Vector3(0, 500, 200), new Vector3(0, 0, 0));
+    this._smoothCamPos.copy(this.ship.group.position).add(CAMERA_OFFSET);
+    this.camera.position.copy(this._smoothCamPos);
+    this.camera.lookAt(this.ship.group.position);
   }
 
   private showEraComplete(flow: Flow): void {
@@ -512,6 +802,28 @@ export class Game {
       </div>
     `;
     document.body.appendChild(el);
+  }
+
+  /**
+   * Persist current game state to localStorage. Called automatically every
+   * 30 s from the frame loop, after puzzle completion, and on death reset.
+   */
+  saveProgress(): void {
+    if (!this.builderResult) return; // nothing meaningful to save
+    const puzzleStages = {} as Record<EraId, 0 | 1 | 2>;
+    for (const flow of this.flowManager.flows) {
+      puzzleStages[flow.era.id as EraId] = flow.puzzleStage;
+    }
+    const data: SaveData = {
+      version: 1,
+      shipConfig: this.builderResult.config,
+      shipStats: this.builderResult.stats,
+      puzzleStages,
+      hp: this.hp,
+      shield: this.shield,
+      boostEnergy: this.boostEnergy,
+    };
+    SaveManager.save(data);
   }
 
   private checkCollisions(): void {
@@ -554,6 +866,11 @@ export class Game {
     this._fogInside.setHex(flow.era.palette.fog);
     this.key.color.setHex(flow.era.palette.accent);
     this.celestial.setEra(flow.era.id);
+    // Swap the era music to match. AudioManager crossfades across
+    // FADE_SECONDS and respects the current outside factor so a mid-free-
+    // space flyby from one corridor's influence zone to another's fades
+    // tracks without spiking either one to full volume.
+    getAudio().setActiveEra(flow.era.id);
   }
 
   private frame = (now: number): void => {
@@ -577,7 +894,8 @@ export class Game {
     activeFlow.worldToLocalPoint(this.ship.group.position, this._scratchLocalShip);
 
     if (!this.won) {
-      this.ship.update(dt, getInput(), {
+      const input = getInput();
+      this.ship.update(dt, input, {
         outsideFactor: outside,
         flowAxis: activeFlow.axis,
         flowQuaternion: activeFlow.quaternion,
@@ -586,10 +904,36 @@ export class Game {
       });
       if (this.invuln > 0) this.invuln -= dt;
       this.checkCollisions();
+      // Regen + boost bookkeeping run every frame regardless of the puzzle
+      // state — they drive the HUD, and pausing them would desync readouts.
+      this.regenerate(dt);
+      const boostingNow = input.boost && this.boostEnergy > 0;
+      this.updateBoostEnergy(dt, boostingNow);
+      // Edge-trigger: play the rising whoosh once when boost kicks in, not
+      // every frame it's held. Released-then-pressed re-arms the SFX.
+      if (boostingNow && !this._wasBoosting) getAudio().playBoost();
+      this._wasBoosting = boostingNow;
+      // Shield bubble visible only while there is energy to spend. The
+      // regen loop above brings `shield` back above 0 after the delay, at
+      // which point the bubble reappears automatically.
+      if (this.shieldMesh) this.shieldMesh.visible = this.shield > 0;
+      this.hud.updateHpShield(this.hp, this.maxHp, this.shield, this.maxShield);
+      this.hud.setBoostReady(this.boostEnergy);
     }
+
+    // Vibe Jam portal tick — spins rings, twinkles particles, and if the
+    // ship flies through one, builds the forwarding URL from the current
+    // snapshot and hard-redirects to the jam webring (or back to the
+    // referring site for the return portal).
+    this.portals.update(dt, this.ship.group.position, this.snapshotShipState);
 
     // HUD / sky / lighting follow active flow.
     this.applyHudForActiveFlow();
+
+    // Music crossfade: inside corridor → active-era track, free space →
+    // Tokyo Rifft score. AudioManager early-outs when the factor hasn't
+    // moved >1% so this is effectively free on steady-state frames.
+    getAudio().setOutsideFactor(outside);
 
     this.skybox.setOutsideFactor(outside);
     this.skybox.setFlowOrientation(activeFlow.inverseQuaternion);
@@ -634,7 +978,16 @@ export class Game {
 
     const camOffset = flowFrameOffset.lerp(shipFrameOffset, outside);
     const target = this._scratchC.copy(this.ship.group.position).add(camOffset);
-    this._smoothCamPos.lerp(target, Math.min(1, dt * 6));
+    // On the inside↔outside boundary the ship teleports (see Ship.ts exit
+    // snap), so chase-smoothing the camera would trail the jump for ~1/6s
+    // and register as jerk. Snap instead, then resume smoothing.
+    const freeNow = outside > 0.5;
+    if (freeNow !== this._wasFree) {
+      this._smoothCamPos.copy(target);
+    } else {
+      this._smoothCamPos.lerp(target, Math.min(1, dt * 6));
+    }
+    this._wasFree = freeNow;
     this.camera.position.copy(this._smoothCamPos);
 
     const shipUp = this._scratchD
@@ -675,4 +1028,24 @@ export class Game {
     this.composer.render(dt);
     requestAnimationFrame(this.frame);
   };
+}
+
+/**
+ * Accept the three color formats the jam spec allows (`#RRGGBB`, `RRGGBB`,
+ * `0xRRGGBB`) and return a bare hex string with no prefix. Returns null
+ * when the input can't be interpreted — callers fall back to the default.
+ */
+function normaliseColorHex(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  let s = raw.trim();
+  if (s.startsWith('#')) s = s.slice(1);
+  else if (s.startsWith('0x') || s.startsWith('0X')) s = s.slice(2);
+  if (!/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(s)) return null;
+  if (s.length === 3) {
+    s = s
+      .split('')
+      .map((c) => c + c)
+      .join('');
+  }
+  return s.toLowerCase();
 }

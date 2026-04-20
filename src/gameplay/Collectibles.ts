@@ -22,21 +22,42 @@ import { laneX } from './Track.ts';
  * it up. On pickup it plays a capture animation: lifts up, spins faster,
  * scales up, fades out while a gold ring burst expands around it.
  *
- * Collision: simple sphere–sphere (generous to the player).
+ * ## Modular-loop placement
+ *
+ * Orbs are NOT a head/tail ring buffer chasing the ship. Instead each orb
+ * owns a fixed "canonical" (x, y, z) inside a closed axial loop of length
+ * `LOOP_LENGTH`. Every frame we compute a displayed Z:
+ *
+ *     wrapK    = round((shipZ - orb.loopZ) / LOOP_LENGTH)
+ *     displayZ = orb.loopZ + wrapK * LOOP_LENGTH
+ *
+ * This keeps each orb at the nearest loop image of its canonical Z to the
+ * ship's projection. Net effect: orbs form a stable, uniformly-spaced
+ * window that always brackets the ship on both sides, regardless of
+ * entry point, flight direction, or whether the ship is inside the flow
+ * or viewing it from free space. No seeding around entry position, no
+ * one-ended chain drift, no empty bands on side-entry.
+ *
+ * ## Collection respawn
+ *
+ * When an orb is captured, we remember the wrapK it was in. The orb
+ * hides until the ship has moved far enough along the axis that wrapK
+ * changes — at which point the orb reappears in the NEXT loop iteration.
+ * At ~48 u/s travel and LOOP_LENGTH ≈ 2400, that's roughly a 25-second
+ * respawn cadence per orb, but since 80 orbs are distributed across the
+ * loop the player sees a new orb about every 0.6 s on average.
  */
 
-// Continuous orb chain: seeded symmetrically around local-Z = 0 and
-// recycled at both ends so there is always a steady cadence of pickups
-// in front of AND around the ship, visible as a line of orbs threading
-// through the obstacle field. Once the era target is reached orbs keep
-// appearing (purely decorative from then on) so the corridor never looks
-// empty of its sacred tokens.
-const POOL_SIZE = 22;
-const RECYCLE_BEHIND = 12;
-const MIN_SPACING_Z = 24;
-const MAX_SPACING_Z = 36;
-const CHAIN_HALF_LENGTH = (POOL_SIZE / 2) * MAX_SPACING_Z;
-const RECYCLE_DIST = CHAIN_HALF_LENGTH + 60;
+const POOL_SIZE = 80;
+/** Length of one axial loop. Chosen so POOL_SIZE orbs sit ~30 u apart. */
+const LOOP_LENGTH = POOL_SIZE * 30;
+/** Half-loop, used in the wrap math (round-nearest). */
+const HALF_LOOP = LOOP_LENGTH / 2;
+/** Nominal spacing between successive canonical orbs. */
+const NOMINAL_SPACING = LOOP_LENGTH / POOL_SIZE;
+/** Per-orb jitter applied to the even spacing so the loop doesn't look
+ *  like a metronome — kept below half the spacing so orbs never cross. */
+const SPACING_JITTER = NOMINAL_SPACING * 0.35;
 const PICKUP_RADIUS = 2.4;
 const LANE_HALF = 11.0;
 const Y_RANGE = 8.0;
@@ -70,11 +91,23 @@ interface Orb {
   readonly burstMat: MeshBasicMaterial;
   /** Extra rings for multi-ring styles (radial, swirl, shatter). */
   readonly extraBursts: Array<{ mesh: Mesh; mat: MeshBasicMaterial; phase: number }>;
+  /** Canonical X — fixed once at init, applied every frame. */
+  loopX: number;
+  /** Canonical Y — fixed, applied every frame (plus bob). */
+  loopY: number;
+  /** Canonical Z within one loop iteration, in [-HALF_LOOP, +HALF_LOOP). */
+  loopZ: number;
+  /** Current displayed position (canonical + wrap offset + bob). Kept in
+   *  sync each frame so animateCapture and pickup reads one spot. */
   readonly basePos: Vector3;
   active: boolean;
   phase: number;
   capturing: boolean;
   captureT: number;
+  /** Post-capture hide: orb waits in this wrap-K until the ship advances
+   *  to a new one, then reappears in the fresh loop iteration. `-Infinity`
+   *  means "not hidden". */
+  respawnWrapK: number;
 }
 
 export interface CollectiblesEvents {
@@ -99,7 +132,7 @@ export class Collectibles {
     this.captureDur = CAPTURE_DUR[this.captureStyle];
   }
 
-  private buildOrb(): Orb {
+  private buildOrb(loopX: number, loopY: number, loopZ: number): Orb {
     const spec = ERA_CONTENT[this.eraId].collectible;
     const group = new Group();
     const model = Assets.clone(spec.name);
@@ -138,36 +171,44 @@ export class Collectibles {
       burst: primary.mesh,
       burstMat: primary.mat,
       extraBursts: extras,
-      basePos: new Vector3(),
+      loopX,
+      loopY,
+      loopZ,
+      basePos: new Vector3(loopX, loopY, loopZ),
       active: true,
       phase: Math.random() * Math.PI * 2,
       capturing: false,
       captureT: 0,
+      respawnWrapK: Number.NEGATIVE_INFINITY,
     };
   }
 
-  /** Axial Z of the tail (most-behind, +Z) end of the orb chain. */
-  private tailZ = 0;
-  /** Axial Z of the head (most-ahead, -Z) end of the orb chain. */
-  private headZ = 0;
-
   init(): void {
+    // Distribute POOL_SIZE orbs evenly across one loop with per-orb jitter.
+    // Canonical Z lives in [-HALF_LOOP, +HALF_LOOP); the wrap math in update()
+    // places each orb in the loop image nearest the ship every frame.
     for (let i = 0; i < POOL_SIZE; i++) {
-      const o = this.buildOrb();
+      const baseZ = (i + 0.5) * NOMINAL_SPACING - HALF_LOOP;
+      const loopZ = baseZ + rand(-SPACING_JITTER, SPACING_JITTER);
+      const loopX = laneX(loopZ) + rand(-LANE_HALF, LANE_HALF);
+      const loopY = rand(-Y_RANGE, Y_RANGE);
+      const o = this.buildOrb(loopX, loopY, loopZ);
       this.orbs.push(o);
       this.group.add(o.group);
     }
-    this.layOutChainAround(0);
   }
 
   get collected(): number {
     return this._collected;
   }
 
+  /** Reset capture animation state + visibility for an orb returning to
+   *  the loop (either post-capture respawn or hard reset). */
   private resetOrbVisuals(o: Orb): void {
     o.group.scale.setScalar(1);
     o.model.rotation.set(0, 0, 0);
     o.model.visible = true;
+    o.group.visible = true;
     o.burst.visible = false;
     o.burstMat.opacity = 0;
     for (const e of o.extraBursts) {
@@ -179,85 +220,61 @@ export class Collectibles {
     o.active = this._collected < this.target;
     o.capturing = false;
     o.captureT = 0;
-  }
-
-  private placeAt(o: Orb, z: number): void {
-    o.basePos.set(
-      laneX(z) + rand(-LANE_HALF, LANE_HALF),
-      rand(-Y_RANGE, Y_RANGE),
-      z,
-    );
-    o.group.position.copy(o.basePos);
-    this.resetOrbVisuals(o);
-  }
-
-  /** Seed the orb chain symmetrically around the given axial centre. */
-  private layOutChainAround(centerZ: number): void {
-    const half = Math.floor(this.orbs.length / 2);
-    let z = centerZ;
-    for (let i = 0; i < half; i++) {
-      z += rand(MIN_SPACING_Z, MAX_SPACING_Z);
-      this.placeAt(this.orbs[i], z);
-    }
-    this.tailZ = z;
-    z = centerZ;
-    for (let i = half; i < this.orbs.length; i++) {
-      z -= rand(MIN_SPACING_Z, MAX_SPACING_Z);
-      this.placeAt(this.orbs[i], z);
-    }
-    this.headZ = z;
-  }
-
-  /** Append one orb at the forward (head) end of the chain. */
-  private respawnAhead(o: Orb): void {
-    this.headZ -= rand(MIN_SPACING_Z, MAX_SPACING_Z);
-    this.placeAt(o, this.headZ);
+    o.respawnWrapK = Number.NEGATIVE_INFINITY;
   }
 
   update(dt: number, shipPos: Vector3, _cameraPos: Vector3): void {
     for (const o of this.orbs) {
+      // -------- Capture animation phase --------
       if (o.capturing) {
         o.captureT += dt;
         const k = Math.min(1, o.captureT / this.captureDur);
         this.animateCapture(o, k, dt);
         if (k >= 1) {
+          // Hide the orb and stamp the wrap iteration it was captured in.
+          // It reappears in the next loop iteration (see respawn branch
+          // below) — same canonical spot, fresh loop copy.
           o.capturing = false;
-          // Always respawn so the corridor keeps its steady cadence of
-          // tokens, even after the era target is met.
-          this.respawnAhead(o);
+          o.respawnWrapK = Math.round(
+            (shipPos.z - o.loopZ) / LOOP_LENGTH,
+          );
+          o.group.visible = false;
         }
         continue;
       }
 
-      o.phase += dt;
-      o.group.position.y = o.basePos.y + Math.sin(o.phase * 1.8) * 0.35;
-      o.model.rotation.y += dt * 1.3;
+      // -------- Modular loop wrap --------
+      // Closed-form: orb sits at the loop image of its canonical Z nearest
+      // the ship's projection. No head/tail cursors, no seeding events —
+      // works identically at entry, mid-flight, and free-space viewing.
+      const wrapK = Math.round((shipPos.z - o.loopZ) / LOOP_LENGTH);
 
-      const dz = o.group.position.z - shipPos.z;
-      // Chain recycling: any orb that drifts past the window on either end
-      // wraps to the opposite end so coverage stays continuous around the
-      // ship at all times.
-      if (dz > RECYCLE_DIST) {
-        this.respawnAhead(o);
-        continue;
+      // -------- Post-capture respawn gate --------
+      if (o.respawnWrapK !== Number.NEGATIVE_INFINITY) {
+        if (wrapK !== o.respawnWrapK) {
+          this.resetOrbVisuals(o);
+          // Fall through to position + bob below.
+        } else {
+          continue;
+        }
       }
-      if (dz < -RECYCLE_DIST) {
-        this.tailZ += rand(MIN_SPACING_Z, MAX_SPACING_Z);
-        this.placeAt(o, this.tailZ);
-        continue;
-      }
-      // Legacy close-behind recycle — orbs passing directly behind the ship
-      // move ahead immediately so the lane ahead is always seeded.
-      if (dz > RECYCLE_BEHIND) {
-        this.respawnAhead(o);
-        continue;
-      }
+
+      o.basePos.set(o.loopX, o.loopY, o.loopZ + wrapK * LOOP_LENGTH);
+
+      // Idle bob + spin.
+      o.phase += dt;
+      o.group.position.x = o.basePos.x;
+      o.group.position.y = o.basePos.y + Math.sin(o.phase * 1.8) * 0.35;
+      o.group.position.z = o.basePos.z;
+      o.model.rotation.y += dt * 1.3;
 
       if (!o.active) continue;
 
+      // -------- Pickup check --------
       const ddx = o.group.position.x - shipPos.x;
       const ddy = o.group.position.y - shipPos.y;
-      const d2 = ddx * ddx + ddy * ddy + dz * dz;
+      const ddz = o.basePos.z - shipPos.z;
+      const d2 = ddx * ddx + ddy * ddy + ddz * ddz;
       if (d2 < PICKUP_RADIUS * PICKUP_RADIUS) {
         this.pickup(o);
       }
@@ -372,6 +389,9 @@ export class Collectibles {
     for (const e of o.extraBursts) {
       e.mesh.position.set(0, 0.3, 0);
     }
+    // Freeze basePos at the actual displayed position so the capture
+    // flourish animates around where the player saw the orb, not the
+    // canonical pre-wrap coords.
     o.basePos.copy(o.group.position);
     this._collected = Math.min(this.target, this._collected + 1);
     this.events.onPickup(this._collected, this.target);
@@ -387,15 +407,7 @@ export class Collectibles {
 
   reset(): void {
     this._collected = 0;
-    this.layOutChainAround(0);
+    for (const o of this.orbs) this.resetOrbVisuals(o);
   }
 
-  /**
-   * Redistribute the orb pool around the given local-Z so the player lands
-   * inside a full chain of pickups on entering a flow, even at a large axial
-   * offset where the initial layout around z=0 would leave a long gap.
-   */
-  recenter(shipZ: number): void {
-    this.layOutChainAround(shipZ);
-  }
 }

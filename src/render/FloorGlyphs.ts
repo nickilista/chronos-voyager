@@ -8,7 +8,6 @@ import {
   Mesh,
   MeshBasicMaterial,
   PlaneGeometry,
-  Vector3,
 } from 'three';
 import type { Era } from '../eras/eras.ts';
 import { CORRIDOR_RADIUS } from '../gameplay/Track.ts';
@@ -17,11 +16,19 @@ import { CORRIDOR_RADIUS } from '../gameplay/Track.ts';
  * Floor-level ornamental glyph tiles that stream past beneath the ship to
  * enrich the interior of a flow corridor. Each tile is a simple emissive
  * plane laid flat on the local-XZ plane at the bottom of the tube, tinted
- * with the era accent colour. As the ship advances, tiles that fall out of
- * the window are recycled to the opposite end of the chain.
+ * with the era accent colour.
  *
- * The tiles sit well below the ship's gameplay band so they never interfere
- * with the obstacle lane — they're pure visual ground dressing.
+ * Placement uses the same closed-form modular loop as Track / Collectibles
+ * / Decorations: each tile owns a canonical `loopZ`, and every frame it
+ * renders at the loop image of that Z nearest the ship:
+ *
+ *     wrapK  = round((shipZ - tile.loopZ) / LOOP_LENGTH)
+ *     mesh.z = tile.loopZ + wrapK * LOOP_LENGTH
+ *
+ * This guarantees a full floor of glyphs bracketing the ship at any entry
+ * Z, and no gaps while a chain catches up. The tiles sit well below the
+ * ship's gameplay band so they never interfere with the obstacle lane —
+ * they're pure visual ground dressing.
  */
 
 const POOL_SIZE = 28;
@@ -29,10 +36,10 @@ const FLOOR_Y = -CORRIDOR_RADIUS + 3.5;
 const TILE_SIZE = 6;
 // Axial cadence — tight enough that at playing speed a new glyph rushes
 // past roughly every half-second, giving a steady processional rhythm.
-const MIN_SPACING_Z = 18;
-const MAX_SPACING_Z = 26;
-const CHAIN_HALF_LENGTH = (POOL_SIZE / 2) * MAX_SPACING_Z;
-const RECYCLE_DIST = CHAIN_HALF_LENGTH + 40;
+const NOMINAL_SPACING = 22;
+const LOOP_LENGTH = POOL_SIZE * NOMINAL_SPACING;
+const HALF_LOOP = LOOP_LENGTH / 2;
+const SPACING_JITTER = NOMINAL_SPACING * 0.35;
 // Lateral extent across the floor: kept inside the corridor wall with a
 // margin so tiles never clip the cylinder geometry.
 const X_MAX = CORRIDOR_RADIUS - 12;
@@ -137,7 +144,10 @@ function buildGlyphTexture(accentHex: number, variant: number): CanvasTexture {
 
 interface GlyphItem {
   mesh: Mesh;
-  lateral: number;
+  /** Canonical axial Z inside the loop. */
+  loopZ: number;
+  /** Lateral X (fixed). */
+  loopX: number;
 }
 
 export class FloorGlyphs {
@@ -145,8 +155,6 @@ export class FloorGlyphs {
   private items: GlyphItem[] = [];
   private textures: CanvasTexture[] = [];
   private readonly accent: number;
-  private tailZ = 0;
-  private headZ = 0;
 
   constructor(era: Era) {
     this.accent = era.palette.accent;
@@ -170,55 +178,26 @@ export class FloorGlyphs {
       });
       const mesh = new Mesh(geo, mat);
       mesh.rotation.x = -Math.PI / 2; // lie flat on the floor plane
+      mesh.rotation.z = rand(0, Math.PI * 2);
       mesh.frustumCulled = false;
-      this.items.push({ mesh, lateral: 0 });
+      const baseZ = (i + 0.5) * NOMINAL_SPACING - HALF_LOOP;
+      const loopZ = baseZ + rand(-SPACING_JITTER, SPACING_JITTER);
+      const loopX = rand(-X_MAX, X_MAX);
+      mesh.position.set(loopX, FLOOR_Y, loopZ);
+      this.items.push({ mesh, loopZ, loopX });
       this.group.add(mesh);
     }
-    this.layOutChainAround(0);
   }
 
-  private layOutChainAround(centerZ: number): void {
-    const half = Math.floor(this.items.length / 2);
-    let z = centerZ;
-    for (let i = 0; i < half; i++) {
-      z += rand(MIN_SPACING_Z, MAX_SPACING_Z);
-      this.placeAt(this.items[i], z);
-    }
-    this.tailZ = z;
-    z = centerZ;
-    for (let i = half; i < this.items.length; i++) {
-      z -= rand(MIN_SPACING_Z, MAX_SPACING_Z);
-      this.placeAt(this.items[i], z);
-    }
-    this.headZ = z;
-  }
-
-  private placeAt(item: GlyphItem, z: number): void {
-    const lateral = rand(-X_MAX, X_MAX);
-    item.lateral = lateral;
-    item.mesh.position.set(lateral, FLOOR_Y, z);
-    item.mesh.rotation.z = rand(0, Math.PI * 2);
-  }
-
-  private readonly _work = new Vector3();
-
+  /**
+   * Per-frame: slide each tile to the loop image of its canonical Z nearest
+   * the ship. Same closed-form pattern as Track / Decorations.
+   */
   update(shipZ: number): void {
     for (const item of this.items) {
-      const dz = item.mesh.position.z - shipZ;
-      if (dz > RECYCLE_DIST) {
-        this.headZ -= rand(MIN_SPACING_Z, MAX_SPACING_Z);
-        this.placeAt(item, this.headZ);
-      } else if (dz < -RECYCLE_DIST) {
-        this.tailZ += rand(MIN_SPACING_Z, MAX_SPACING_Z);
-        this.placeAt(item, this.tailZ);
-      }
-      // Silence three.js treeshaker lint — _work left for future per-tile
-      // animation (e.g. subtle pulse keyed off axial distance).
-      this._work.copy(item.mesh.position);
+      const wrapK = Math.round((shipZ - item.loopZ) / LOOP_LENGTH);
+      item.mesh.position.z = item.loopZ + wrapK * LOOP_LENGTH;
     }
   }
 
-  recenter(shipZ: number): void {
-    this.layOutChainAround(shipZ);
-  }
 }

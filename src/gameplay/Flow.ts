@@ -49,13 +49,6 @@ export class Flow {
 
   private readonly _localShip = new Vector3();
   private readonly _localVel = new Vector3();
-  /**
-   * Tracks whether the ship was outside this flow's corridor on the previous
-   * frame — used to detect the transition "outside → inside" so we can
-   * redistribute obstacles/collectibles/decor around the ship's entry axial,
-   * avoiding the long empty band that would otherwise follow a side entry.
-   */
-  private _wasOutside = true;
 
   constructor(era: Era, origin: Vector3, axis: Vector3, events: FlowEvents) {
     this.era = era;
@@ -153,16 +146,12 @@ export class Flow {
   ): void {
     this.worldToLocalPoint(shipWorld, this._localShip);
     this.worldToLocalDir(shipVelWorld, this._localVel);
-    // Entry transition: redistribute content around the ship's current axial
-    // position so the player lands in a populated stretch of corridor instead
-    // of a long empty gap while the recycle ring catches up.
-    if (this._wasOutside && outsideFactor < 0.05) {
-      this.track.recenter(this._localShip.z);
-      this.decorations.recenter(this._localShip.z);
-      this.collectibles.recenter(this._localShip.z);
-      this.floorGlyphs.recenter(this._localShip.z);
-    }
-    this._wasOutside = outsideFactor > 0.5;
+    // All subsystems (Track, Decorations, Collectibles, FloorGlyphs) use
+    // modular-loop placement: each object owns a canonical (x, y, z) inside
+    // a closed axial loop and is rendered every frame at the loop image
+    // nearest the ship. That means there's nothing to "seed around the
+    // entry" — the loop always brackets the ship regardless of entry axial,
+    // flight direction, or whether the ship just crossed the corridor wall.
     this.track.update(this._localShip.z, dt);
     this.decorations.update(this._localShip.z);
     this.floorGlyphs.update(this._localShip.z);
@@ -202,6 +191,22 @@ export class Flow {
 
   setVisible(visible: boolean): void {
     this.group.visible = visible;
+  }
+
+  /**
+   * Free-space LOD toggle: when the ship is outside every corridor we still
+   * want the 10 flow tubes visible as navigation targets, but their
+   * *interior* gameplay content (obstacles, collectibles, floor glyphs) is
+   * just invisible weight in the scene graph when viewed from the outside —
+   * the tubes are sealed by their aura membrane and you can't collide with
+   * anything inside from out there. Hide those heavy pools to free the GPU.
+   * The decor halo + corridor aura stay visible because they ARE the
+   * landmark that makes each flow readable on the galaxy map.
+   */
+  setInteriorVisible(visible: boolean): void {
+    this.track.group.visible = visible;
+    this.collectibles.group.visible = visible;
+    this.floorGlyphs.group.visible = visible;
   }
 
   resetCollectibles(): void {

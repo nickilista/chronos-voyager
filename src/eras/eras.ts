@@ -209,7 +209,7 @@ export const ERAS: readonly Era[] = [
     palette: {
       primary: 0x2ecc71,
       bg: 0x0a1210,
-      accent: 0x00ff88,
+      accent: 0x00bb55,
       fog: 0x0f1a16,
     },
     skybox: { hueBase: 0.35, hueSpread: 0.1, density: 0.4, starBrightness: 1.0 },

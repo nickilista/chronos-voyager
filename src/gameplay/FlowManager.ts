@@ -206,6 +206,15 @@ export class FlowManager {
       const flowOutside = isActive ? this.outsideFactor : 1;
       const flowBoundary = isActive ? this.boundaryProximity : 0;
       this.flows[i].setVisible(isActive || shipInFreeSpace);
+      // Free-space LOD: the 9 non-active flows render only their decor halo
+      // + aura tube (enough to read as a landmark) and suppress obstacles /
+      // collectibles / floor glyphs. The active flow keeps full interior
+      // always — we might re-enter it at any moment. This drops ~2,200
+      // meshes from the free-space render pass, which is what was making
+      // the galaxy-map view feel scattoso. When the ship re-enters a flow,
+      // its interior snaps back in without any repopulation work (modular-
+      // loop placement means every obstacle is always in its correct spot).
+      this.flows[i].setInteriorVisible(isActive || !shipInFreeSpace);
       this.flows[i].update(
         dt,
         shipWorld,
