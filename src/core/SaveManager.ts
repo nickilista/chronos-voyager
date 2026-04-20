@@ -182,7 +182,7 @@ export const SaveManager = {
    */
   isUnlocked(cls: ShipClass, save: SaveData | null): boolean {
     if (cls === 'falcon') return true;
-    if (!save) return false;
+    if (!save) return (DEFAULT_UNLOCKED as readonly string[]).includes(cls);
     return save.unlockedShips.includes(cls);
   },
 
