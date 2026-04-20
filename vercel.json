@@ -13,6 +13,25 @@
           "value": "public, max-age=31536000, immutable"
         }
       ]
+    },
+    {
+      "//": "GLB / HDR / MP3 / JSON in /models and /hdri and /audio — long cache so the prewarm fetch on first visit populates the HTTP cache and subsequent sessions skip the network entirely.",
+      "source": "/models/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=604800, stale-while-revalidate=2592000" }
+      ]
+    },
+    {
+      "source": "/hdri/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=604800, stale-while-revalidate=2592000" }
+      ]
+    },
+    {
+      "source": "/audio/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=604800, stale-while-revalidate=2592000" }
+      ]
     }
   ]
 }

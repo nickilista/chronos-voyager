@@ -8,6 +8,8 @@ import { presetConfig } from './shipbuilder/StatsCalculator.ts';
 import { showIntro } from './ui/IntroScreen.ts';
 import type { ShipBuilderResult } from './shipbuilder/ShipBuilder.ts';
 import { SaveManager, type SaveData } from './core/SaveManager.ts';
+import { preloadAssets } from './gameplay/Assets.ts';
+import { prewarmCombatAssets } from './gameplay/PrewarmCombat.ts';
 
 /**
  * Boot sequence:
@@ -44,6 +46,21 @@ renderer.toneMapping = NoToneMapping;
 renderer.toneMappingExposure = 1.0;
 
 const portalQuery = parsePortalQuery();
+
+// Start loading the heavy gameplay assets RIGHT NOW — they run in
+// parallel with the intro screen + ShipBuilder UI so by the time the
+// player clicks Launch, everything the Game needs is already in memory
+// (or at worst, in the browser's HTTP cache one parse away). Both
+// helpers are idempotent: the actual `Game.start()` path calls
+// `preloadAssets()` again (which returns instantly when already
+// loaded), and `Meteorites.init()` / `ExplosionPool.init()` hit the
+// warmed HTTP cache rather than making fresh network requests.
+//
+// We deliberately don't `await` here: blocking on these defeats the
+// point. The promises are swallowed; errors surface when the real
+// init paths fire later.
+void preloadAssets().catch(() => {});
+void prewarmCombatAssets();
 
 let result: ShipBuilderResult;
 let savedData: SaveData | undefined;
