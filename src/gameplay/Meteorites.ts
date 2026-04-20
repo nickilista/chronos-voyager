@@ -335,7 +335,9 @@ export class Meteorites {
     // All cluster members share a type so the result reads as "a belt of X"
     // rather than a mixed-species chaos ball. Pick once, reuse.
     const type = this.pickType();
-    const clusterRadius = 30;
+    // Loose clusters — 60u spread so even a "group" reads as half a
+    // dozen rocks in the same neighbourhood, not a tight ball.
+    const clusterRadius = 60;
     for (let i = 0; i < count; i++) {
       if (this.active.length >= rules.maxActive) break;
       _tmpLateral.set(
@@ -370,9 +372,13 @@ export class Meteorites {
     if (Math.abs(_tmpDir.y) > 0.95) _tmpUp.set(0, 0, -1);
     _tmpRight.copy(_tmpDir).cross(_tmpUp).normalize();
     _tmpUp.copy(_tmpRight).cross(_tmpDir).normalize();
-    // Lateral scatter up to ~40% of spawn distance: keeps meteorites inside
-    // the player's view frustum without dumping them directly on the nose.
-    const lateral = spawnDistance * 0.35;
+    // Lateral scatter: wide fraction of the spawn distance so each
+    // meteorite feels like "another rock in a big sparse belt" rather
+    // than "the next rock on the rails". 0.6 gives a ±264u halo at
+    // spawnDistance=440, which is wider than the camera frustum at
+    // that depth — some rocks spawn off-screen and drift through view,
+    // which reads more naturally than always-centered pop-ins.
+    const lateral = spawnDistance * 0.6;
     const ox = (Math.random() - 0.5) * 2 * lateral;
     const oy = (Math.random() - 0.5) * 2 * lateral;
     return shipPos.clone()

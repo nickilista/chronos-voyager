@@ -206,20 +206,16 @@ export class FlowManager {
       const flowOutside = isActive ? this.outsideFactor : 1;
       const flowBoundary = isActive ? this.boundaryProximity : 0;
       this.flows[i].setVisible(isActive || shipInFreeSpace);
-      // Three-tier LOD for the interior (obstacles / collectibles /
-      // floor glyphs):
-      //   • Active flow      → 'full'   — everything on.
-      //   • Inside any flow  → 'full'   — we'll re-enter an instant
-      //     away, so keep them warm.
-      //   • Non-active + ship in free space → 'sparse' — 1-in-10 stride
-      //     of each pool renders. Player still sees gameplay content in
-      //     every tube from the galaxy map, without paying the full
-      //     ~2,200-mesh cost. Previously we either rendered all (recent:
-      //     choppy frame rate) or none (original: empty tubes); 10%
-      //     stride is the compromise.
-      const lod: 'full' | 'sparse' =
-        isActive || !shipInFreeSpace ? 'full' : 'sparse';
-      this.flows[i].setInteriorLOD(lod);
+      // Interior LOD — simpler rule than before: we go 'full' ONLY when
+      // the ship is actually inside THIS flow's corridor tube (the
+      // `!shipInFreeSpace && isActive` case). Every other condition
+      // (near but outside, far, not the active flow at all) stays
+      // 'sparse' — 1-in-10 stride. That way approaching a flow doesn't
+      // suddenly balloon the scene to ~2,300 live meshes just because
+      // the player got close; only crossing the aura membrane triggers
+      // the full population.
+      const insideThisFlow = isActive && !shipInFreeSpace;
+      this.flows[i].setInteriorLOD(insideThisFlow ? 'full' : 'sparse');
       this.flows[i].update(
         dt,
         shipWorld,

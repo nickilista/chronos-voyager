@@ -10,13 +10,13 @@
   },
   "spawnRules": {
     "maxActive": 90,
-    "spawnIntervalSeconds": [0.8, 2.2],
-    "clusterChance": 0.4,
-    "clusterSize": [5, 10],
-    "spawnDistance": 240,
-    "despawnDistance": 360,
+    "spawnIntervalSeconds": [0.7, 2.0],
+    "clusterChance": 0.15,
+    "clusterSize": [2, 4],
+    "spawnDistance": 440,
+    "despawnDistance": 600,
     "freeSpaceOnly": true,
-    "_comment": "spawnDistance: units in front of the ship when a meteorite is spawned. despawnDistance: if the ship outruns the meteorite by this much, recycle it. freeSpaceOnly: don't spawn inside a flow corridor. Bumped from 40→90 and scale 3-5× from the previous 0.5-2.5 so the field reads as 'asteroid belt', not 'three pebbles'."
+    "_comment": "spawnDistance 440: meteorites pop in from far away so they're visible on approach rather than materialising in the player's lap. despawnDistance 600: matching cushion behind the ship before recycle. clusterChance 0.15 + clusterSize 2–4: occasional small clumps, mostly singletons — the 'scatter' feel the player asked for rather than tight belts."
   },
   "weightings": {
     "_comment": "Probability that a fresh spawn is of each type. Normalized at runtime.",
