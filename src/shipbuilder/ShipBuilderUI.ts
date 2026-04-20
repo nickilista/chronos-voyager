@@ -620,7 +620,7 @@ const CSS = `
 .sb-preset--locked {
   /* Locked cards read as disabled — lower contrast, padlock on top,
    * dashed accent to match the "not available" visual language. The
-   * default :hover from `.sb-preset` is overridden to a muted state so
+   * default :hover from .sb-preset is overridden to a muted state so
    * the button doesn't feel actionable (even though we keep the click
    * handler for the shake feedback). */
   filter: grayscale(0.85);
