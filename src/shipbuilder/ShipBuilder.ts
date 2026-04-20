@@ -159,36 +159,37 @@ export class ShipBuilder {
       2000,
     );
 
-    // Deep-space backdrop — dark with a subtle blue-purple gradient feel.
-    this.scene.background = new Color(0x040610);
+    // Deep-space backdrop — pure black for maximum star contrast.
+    this.scene.background = new Color(0x020206);
 
-    // Stars far out.
-    this.stars = makeStarField(2200, 600);
+    // Dense star field behind the ship.
+    this.stars = makeStarField(4000, 500);
     this.scene.add(this.stars);
 
-    // Lighting: stronger ambient + key light + rim accents so the ship
-    // is clearly visible without losing the dark-space atmosphere.
-    const ambient = new AmbientLight(0x6677bb, 0.6);
+    // Lighting: low ambient so shadows are crisp, strong focused key
+    // light + hard rim accents to sculpt the ship's form.
+    const ambient = new AmbientLight(0x334466, 0.25);
     this.scene.add(ambient);
-    const spot = new SpotLight(0xffffff, 3.5, 50, Math.PI * 0.25, 0.4, 1.0);
-    spot.position.set(0, 14, 6);
+    // Key light: tight spot from above-front, low penumbra for sharp edges
+    const spot = new SpotLight(0xffffff, 5.0, 60, Math.PI * 0.18, 0.15, 0.8);
+    spot.position.set(2, 16, 8);
     spot.target.position.set(0, 0, 0);
     this.scene.add(spot, spot.target);
-    // Cool blue rim (left-front)
-    const rimA = new DirectionalLight(0x5fa8ff, 1.2);
-    rimA.position.set(-6, 3, 5);
+    // Cool blue rim (left) — hard directional for crisp edge highlight
+    const rimA = new DirectionalLight(0x60b0ff, 1.6);
+    rimA.position.set(-8, 2, 3);
     this.scene.add(rimA);
-    // Warm amber rim (right-back) for depth
-    const rimB = new DirectionalLight(0xff9a5a, 0.8);
-    rimB.position.set(6, 2, -4);
+    // Warm amber rim (right-back) — defines silhouette against stars
+    const rimB = new DirectionalLight(0xffa050, 1.0);
+    rimB.position.set(7, 1, -5);
     this.scene.add(rimB);
-    // Fill from below so underside isn't pitch black
-    const fillBelow = new DirectionalLight(0x4466aa, 0.4);
-    fillBelow.position.set(0, -5, 2);
+    // Subtle fill from below so the underside isn't fully black
+    const fillBelow = new DirectionalLight(0x223355, 0.2);
+    fillBelow.position.set(0, -6, 1);
     this.scene.add(fillBelow);
-    // Underglow so the platform reads as emitting light.
-    const under = new PointLight(0x5fa8ff, 2.5, 10, 1.8);
-    under.position.set(0, -0.2, 0);
+    // Platform underglow
+    const under = new PointLight(0x4488cc, 1.8, 8, 2.0);
+    under.position.set(0, -0.3, 0);
     this.scene.add(under);
 
     // Post-processing stack mirrors gameplay's so the handoff is seamless.
@@ -278,22 +279,6 @@ export class ShipBuilder {
     const g = gltf.scene as unknown as Group;
     g.position.y = -1.6;
     g.scale.setScalar(1.0);
-
-    // The baked GLB includes a few placeholder props we want to replace:
-    //   • `platform_beam`: a 4u-tall luminous pole at the origin that
-    //     spears right through the ship silhouette.
-    //   • `platform_arm_*` + `platform_joint_*`: crude 1u cube "arms"
-    //     and 0.12u sphere "joints" at the cardinal edges. We swap these
-    //     for proper articulated MechanicalArms attached to the corner
-    //     pillars (see MechanicalArms.ts).
-    // Pillars, grid rings and particle decorations are kept — they read
-    // as a legit hangar deck.
-    const HIDE_PREFIXES = ['platform_beam', 'platform_arm_', 'platform_joint_'];
-    g.traverse((obj) => {
-      if (HIDE_PREFIXES.some((p) => obj.name.startsWith(p))) {
-        obj.visible = false;
-      }
-    });
     return g;
   }
 
