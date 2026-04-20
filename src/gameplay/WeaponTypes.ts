@@ -96,16 +96,17 @@ export const WEAPON_PALETTE: Record<WeaponKind, {
   /** Max effective range in world units. */
   range: number;
 }> = {
-  beam:    { core: 0xff4455, glow: 0xff99aa, speed: 0,   damage: 28, cooldown: 0.20, range: 500 },
-  pulse:   { core: 0x88ffdd, glow: 0x22cc99, speed: 120, damage: 18, cooldown: 0.15, range: 420 },
-  bolt:    { core: 0xffaa44, glow: 0xffdd88, speed: 220, damage: 14, cooldown: 0.09, range: 400 },
+  beam:    { core: 0xff4455, glow: 0xff99aa, speed: 0,   damage: 28, cooldown: 0.20, range: 900 },
+  pulse:   { core: 0x88ffdd, glow: 0x22cc99, speed: 120, damage: 18, cooldown: 0.15, range: 750 },
+  bolt:    { core: 0xffaa44, glow: 0xffdd88, speed: 220, damage: 14, cooldown: 0.09, range: 700 },
   // Missiles: slow, heavy, with a visible smoke trail. High damage per
   // shot, long cooldown — the player fires them deliberately, not on
-  // spray-and-pray. Range is longer so a tracked target across the
+  // spray-and-pray. Longest range so a tracked target across the
   // horizon can still be hit.
-  missile: { core: 0xffd080, glow: 0xff6020, speed: 95,  damage: 45, cooldown: 0.45, range: 600 },
+  missile: { core: 0xffd080, glow: 0xff6020, speed: 95,  damage: 45, cooldown: 0.45, range: 1100 },
   // Gatling / rapid-fire: small bright bullets, fast cooldown, low
   // damage each. Visually distinct from plain 'bolt' by being half
-  // the size with a bluer tracer core.
-  gatling: { core: 0xcfe8ff, glow: 0x5fb8ff, speed: 260, damage: 8,  cooldown: 0.05, range: 320 },
+  // the size with a bluer tracer core. Range is still the shortest
+  // of the family — gatling is a close-support weapon.
+  gatling: { core: 0xcfe8ff, glow: 0x5fb8ff, speed: 260, damage: 8,  cooldown: 0.05, range: 550 },
 };

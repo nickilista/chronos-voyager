@@ -42,8 +42,13 @@ const TRAIL_POOL_SIZE = 64;
  *  long enough to register as a discrete "zap" without leaving a
  *  continuous laser-sword look. */
 const BEAM_VISUAL_DURATION = 0.09;
-/** Max projectile lifetime (safety cap independent of range). */
-const PROJECTILE_LIFETIME = 2.5;
+/** Max projectile lifetime (safety cap independent of range).
+ *  Tuned so the slowest projectile (missile at 95 u/s, range 1100)
+ *  can reach its full range: 1100/95 ≈ 11.6s, so 15s = comfortable
+ *  buffer. Faster weapons (bolt, gatling) will still hit their range
+ *  cutoff in the 2–4s span — this cap only fires when a missile
+ *  somehow misses everything and flies into the void. */
+const PROJECTILE_LIFETIME = 15;
 /** Tunable radii so each kind is visually distinct at a glance. */
 const BOLT_RADIUS = 0.16;
 const PULSE_RADIUS = 0.55;
