@@ -30,7 +30,7 @@ import { Puzzle } from './PuzzleBase.ts';
 
 const N = 3;
 const MAGIC = 15; // n(n²+1)/2
-const BLANKS = 6; // iOS tileSize 2 = hard mode
+const BLANKS = 8; // max difficulty: only 1 given cell
 const CELL_PX = 72;
 const BOARD_PX = N * CELL_PX;
 

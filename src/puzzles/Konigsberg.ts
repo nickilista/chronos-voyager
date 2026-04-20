@@ -261,8 +261,8 @@ export class KonigsbergPuzzle extends Puzzle {
   readonly instructions =
     'Cross every bridge exactly once. Tap a landmass to begin, then step to adjacent shores. No bridge may be retraced.';
 
-  private level = 1;
-  private graph: KBGraph = getGraph(1);
+  private level = 7;
+  private graph: KBGraph = getGraph(7);
   private path: number[] = [];
   private traversedEdges: Set<number> = new Set();
   private phase: 'playing' | 'won' | 'lost' = 'playing';

@@ -213,7 +213,7 @@ export class PlayfairPuzzle extends Puzzle {
   readonly instructions =
     'Decrypt the cipher digraphs by tapping the correct plaintext letter pair from the grid. Same row → shift left, same column → shift up, rectangle → swap columns.';
 
-  private level = 3; // default level
+  private level = 7; // max difficulty
   private mission!: PFMission;
 
   // State

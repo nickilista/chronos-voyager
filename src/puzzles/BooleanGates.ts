@@ -181,8 +181,8 @@ export class BooleanGatesPuzzle extends Puzzle {
   readonly instructions =
     'Predict the circuit output or toggle inputs to match the target. Complete all rounds with lives remaining.';
 
-  private level = 1;
-  private circuit: BLCircuit = circuitForLevel(1);
+  private level = 5;
+  private circuit: BLCircuit = circuitForLevel(5);
   private currentRound = 0;
   private score = 0;
   private lives = 3;

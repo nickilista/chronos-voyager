@@ -261,8 +261,8 @@ export class CardanoDicePuzzle extends Puzzle {
   readonly instructions =
     'Cardano reckoned probability from the ratio of favourable outcomes to all outcomes. Select the correct fraction for the question shown.';
 
-  private level = 3; // default mid-level
-  private scenario: Scenario = generateScenario(3);
+  private level = 5; // max difficulty
+  private scenario: Scenario = generateScenario(5);
   private options: string[] = [];
   private correctIndex = 0;
   private selectedIndex: number | null = null;

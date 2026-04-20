@@ -29,7 +29,7 @@ import { Puzzle } from './PuzzleBase.ts';
 
 /* ── Config ─────────────────────────────────────────────────────── */
 
-const GRID_N = 6;
+const GRID_N = 8;
 const CELL_PX = 56;
 const BOARD_PX = GRID_N * CELL_PX;
 

@@ -148,7 +148,7 @@ export class SorobanPuzzle extends Puzzle {
   readonly instructions =
     'Tap beads to move them toward the beam. Heaven bead = 5, earth beads = 1 each. Set the target value and submit.';
 
-  private level = 3; // default level; can be configured
+  private level = 8; // max difficulty
   private colCount = 5;
   private rounds = 4;
   private maxLives = 3;

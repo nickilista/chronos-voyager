@@ -220,7 +220,7 @@ export class SenetPuzzle extends Puzzle {
   readonly instructions =
     'Throw the sticks, then tap one of your Ankh pieces to move. Math-trap squares summon Thoth \u2014 answer correctly within 10s to hold your ground. Guide all your Ankhs past square 30 before your turns run out.';
 
-  private level = 2;
+  private level = 5;
   private pieceCount = 3;
   private maxTurns = 50;
   private trapSquares = mathTrapSquares(2);

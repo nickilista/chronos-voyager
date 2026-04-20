@@ -966,6 +966,13 @@ export class Game {
    * sell the impact. No armor subtraction here (meteorites in free space
    * don't go through the CRASH_BASE_DAMAGE armor reduction — it's raw
    * touch damage from the config).
+   *
+   * Death penalty: meteorite kills forfeit ONE collected ship-part from
+   * a random in-progress class. If the player has no parts at all,
+   * death is "free" — HP just refills. Design rationale: the risk of
+   * flying through the belt is concrete and proportional to what the
+   * player has already earned, not a flat setback that hurts new
+   * pilots as much as veterans.
    */
   private onMeteoriteHit(damage: number): void {
     if (this.invuln > 0) return;
@@ -978,12 +985,29 @@ export class Game {
     this.shieldRechargeTimer = 0;
     this.invuln = INVULN_AFTER_CRASH;
     this.ship.stun();
-    // Same hit-stop / shake / red flash as a corridor crash — these already
-    // exist and read well; just trigger them here too for consistency.
     this.shakeRemaining = CRASH_SHAKE_DURATION;
     this.flashRemaining = CRASH_FLASH_DURATION;
     if (this.flashEl) this.flashEl.style.opacity = '1';
     this.hud.flashHit();
+
+    // Death check. HP is already clamped to 0 above; at zero we refill
+    // and try to dock a ship-part. If none are owed, the penalty is
+    // silently skipped — a fresh player doesn't get double-punished for
+    // a first-fight death with no inventory to lose.
+    if (this.hp <= 0) {
+      this.hp = this.maxHp;
+      this.shield = 0;
+      const lost = SaveManager.deductPart(this.save);
+      if (lost) {
+        this.saveProgress();
+        getAudio().playCrash();
+        this.showUnlockToast(
+          `Lost a piece of ${lost.cls.toUpperCase()} · ${lost.count}/${SHIP_PART_UNLOCK_THRESHOLD}`,
+          'part',
+        );
+      }
+    }
+    this.hud.updateHpShield(this.hp, this.maxHp, this.shield, this.maxShield);
   }
 
   /**

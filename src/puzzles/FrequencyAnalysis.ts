@@ -99,7 +99,7 @@ export class FrequencyAnalysisPuzzle extends Puzzle {
   readonly instructions =
     'Tap a symbol in the frequency chart, then pick the letter you think it represents. Use the frequency reference to guide your guesses.';
 
-  private level = 0; // 0-indexed
+  private level = 4; // 0-indexed (max difficulty)
   private config!: LevelConfig;
 
   // Cipher state

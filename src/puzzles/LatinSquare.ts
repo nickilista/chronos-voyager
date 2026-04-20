@@ -180,7 +180,7 @@ export class LatinSquarePuzzle extends Puzzle {
   readonly instructions =
     'Fill the grid so each row and column contains every number exactly once. At higher levels, each color must also be unique per row/column.';
 
-  private level = 4;
+  private level = 7;
   private config: LSConfig = configForLevel(4);
   private grid: LSCell[][] = [];
   private solutionGrid: LSCell[][] = [];

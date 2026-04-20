@@ -2,12 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "_comment": "Runtime tuning for the free-space meteorite field. Edited by hand; loaded by src/gameplay/Meteorites.ts at boot.",
   "meteorites": {
-    "rocky":   { "hp": 40,  "speedRange": [18, 36], "scaleRange": [1.8, 5.0], "dropChance": 0.30, "touchDamage": 10, "color": "#666055" },
-    "jagged":  { "hp": 65,  "speedRange": [14, 28], "scaleRange": [3.5, 8.5], "dropChance": 0.50, "touchDamage": 14, "color": "#7a6e5f" },
-    "magma":   { "hp": 55,  "speedRange": [22, 45], "scaleRange": [2.5, 6.0], "dropChance": 0.60, "touchDamage": 26, "color": "#cc4400" },
-    "crystal": { "hp": 32,  "speedRange": [9, 22],  "scaleRange": [2.0, 4.5], "dropChance": 0.80, "touchDamage": 8,  "color": "#9933ff", "rare": true },
-    "iron":    { "hp": 100, "speedRange": [9, 18],  "scaleRange": [1.4, 3.5], "dropChance": 0.40, "touchDamage": 22, "color": "#444455" }
+    "rocky":   { "hp": 40,  "speedRange": [18, 36], "scaleRange": [1.8, 5.0], "dropChance": 0.30, "touchDamage": 35, "color": "#666055" },
+    "jagged":  { "hp": 65,  "speedRange": [14, 28], "scaleRange": [3.5, 8.5], "dropChance": 0.50, "touchDamage": 55, "color": "#7a6e5f" },
+    "magma":   { "hp": 55,  "speedRange": [22, 45], "scaleRange": [2.5, 6.0], "dropChance": 0.60, "touchDamage": 80, "color": "#cc4400" },
+    "crystal": { "hp": 32,  "speedRange": [9, 22],  "scaleRange": [2.0, 4.5], "dropChance": 0.80, "touchDamage": 25, "color": "#9933ff", "rare": true },
+    "iron":    { "hp": 100, "speedRange": [9, 18],  "scaleRange": [1.4, 3.5], "dropChance": 0.40, "touchDamage": 65, "color": "#444455" }
   },
+  "_touchDamageNotes": "Bumped 3-4x from the earlier values: maxHp on most builds is 100, so rocky (35) is 3 hits to kill, iron (65) is ~2 hits, magma (80) can one-shot a damaged hull. Flying through the belt is now a real hazard — mirrors the 'dying loses a ship-part' penalty the player asked for.",
   "spawnRules": {
     "maxActive": 90,
     "spawnIntervalSeconds": [0.7, 2.0],

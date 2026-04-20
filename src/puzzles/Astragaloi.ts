@@ -153,7 +153,7 @@ export class AstragaloiPuzzle extends Puzzle {
   readonly instructions =
     'Roll the astragaloi, then combine bone values with arithmetic to reach the target. Win enough rounds to clear the gate.';
 
-  private level = 0; // 0-indexed into LEVELS
+  private level = 4; // 0-indexed into LEVELS (max difficulty)
   private cfg(): LevelConfig { return LEVELS[Math.min(this.level, LEVELS.length - 1)]; }
 
   // Game state

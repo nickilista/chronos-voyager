@@ -364,7 +364,7 @@ export class LorenzPuzzle extends Puzzle {
   readonly instructions =
     'Break the Lorenz cipher used by the German High Command. Progress through 10 levels from XOR basics to the full Colossus machine.';
 
-  private level = 1;
+  private level = 10;
   private mission!: LZMission;
   private phase: 'playing' | 'decrypting' | 'won' = 'playing';
   private attempts = 0;

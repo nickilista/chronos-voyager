@@ -51,7 +51,7 @@ type Phase = 'idle' | 'rolling' | 'chooseDie' | 'moving' | 'challenge' | 'won' |
 
 /* ── Level config ────────────────────────────────────────────── */
 
-const LEVEL = 1; // default level
+const LEVEL = 5; // max difficulty
 const SPACES_PER_ROW = 5;
 const TILE_W = 44;
 const TILE_GAP = 10;

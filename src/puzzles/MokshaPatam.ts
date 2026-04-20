@@ -29,7 +29,7 @@ import { Puzzle } from './PuzzleBase.ts';
 const ROWS = 6;
 const COLS = 6;
 const GOAL = ROWS * COLS; // 36
-const MAX_TURNS = 11;
+const MAX_TURNS = 8;
 const CELL_PX = 72;
 const BOARD_W = COLS * CELL_PX;
 const BOARD_H = ROWS * CELL_PX;

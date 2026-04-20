@@ -1,5 +1,5 @@
 import { Color, Group, Mesh, MeshStandardMaterial, Vector3 } from 'three';
-import { Assets, makeEmissive } from '../Assets.ts';
+import { Assets } from '../Assets.ts';
 import { ERA_CONTENT } from '../../eras/eraContent.ts';
 import { getEra } from '../../eras/eras.ts';
 import type { EraId } from '../../eras/eras.ts';
@@ -39,7 +39,6 @@ function buildFactory(
   halfUnit: Vector3,
   scale: number,
   type: string,
-  rim: { color: number; intensity: number },
   accentColor: number,
 ): ObstacleFactory {
   // Multiply both the visual scale and the collider halfSize so collisions
@@ -52,21 +51,26 @@ function buildFactory(
     const model = Assets.clone(name);
     model.scale.setScalar(s);
     model.position.y = -halfUnit.y * s;
-    // Per-era rim glow — chosen to contrast with the sky/horizon palette so
-    // obstacles read as silhouettes against the background instead of
-    // blending into it.
-    makeEmissive(model, rim.color, rim.intensity);
-    // Subtle base-color tint toward the era accent so obstacles read as
-    // era-themed without losing their model texture detail.
+    // Clone materials so instances don't share state, then make them
+    // solid and realistic: zero emissive (no glow), high roughness,
+    // subtle era-accent tint so they still read as era-themed.
     model.traverse((obj) => {
       const m = obj as Mesh;
       if (!m.isMesh) return;
-      const mats = Array.isArray(m.material) ? m.material : [m.material];
-      for (const mat of mats) {
-        if (mat instanceof MeshStandardMaterial) {
-          mat.color.lerp(accent, 0.25);
-          mat.needsUpdate = true;
-        }
+      const cloneMat = (mat: MeshStandardMaterial): MeshStandardMaterial => {
+        const c = mat.clone();
+        c.emissive.setHex(0x000000);
+        c.emissiveIntensity = 0;
+        c.roughness = Math.max(c.roughness, 0.75);
+        c.metalness = Math.min(c.metalness, 0.3);
+        c.color.lerp(accent, 0.15);
+        c.needsUpdate = true;
+        return c;
+      };
+      if (Array.isArray(m.material)) {
+        m.material = m.material.map((mat) => cloneMat(mat as MeshStandardMaterial));
+      } else {
+        m.material = cloneMat(m.material as MeshStandardMaterial);
       }
     });
     group.add(model);
@@ -83,10 +87,9 @@ function buildFactory(
 export function obstacleFactoriesFor(eraId: EraId): ObstacleFactory[] {
   const content = ERA_CONTENT[eraId];
   const [a, b] = content.obstacles;
-  const rim = content.obstacleRim;
   const accent = getEra(eraId).palette.accent;
-  const fA = buildFactory(a.name, a.halfUnit, a.obstacleScale, a.type, rim, accent);
-  const fB = buildFactory(b.name, b.halfUnit, b.obstacleScale, b.type, rim, accent);
+  const fA = buildFactory(a.name, a.halfUnit, a.obstacleScale, a.type, accent);
+  const fB = buildFactory(b.name, b.halfUnit, b.obstacleScale, b.type, accent);
   return [fA, fA, fB];
 }
 

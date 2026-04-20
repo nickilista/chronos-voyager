@@ -219,8 +219,8 @@ export class FourColorPuzzle extends Puzzle {
   readonly instructions =
     'Color map regions so no two adjacent regions share the same color. Only four colors are needed.';
 
-  private level = 1;
-  private mapData: FCMap = buildLevel1();
+  private level = 5;
+  private mapData: FCMap = buildLevel5();
   private regionColors: Map<number, number> = new Map(); // regionID → colorIndex
   private selectedColor = 0;
   private conflicts: Set<number> = new Set();

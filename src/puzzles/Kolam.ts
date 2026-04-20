@@ -28,8 +28,8 @@ import { Puzzle } from './PuzzleBase.ts';
 
 /* ── Grid config ─────────────────────────────────────────────── */
 
-const DEFAULT_ROWS = 3;
-const DEFAULT_COLS = 3;
+const DEFAULT_ROWS = 6;
+const DEFAULT_COLS = 6;
 const CANVAS_SIZE = 340;
 const DOT_RADIUS = 6;
 const SEGMENT_LINE_WIDTH = 3.5;

@@ -224,6 +224,33 @@ export const SaveManager = {
   },
 
   /**
+   * Death penalty: remove one collected part from a random in-progress
+   * ship class. Only subtracts if the player has any uncollected-ship
+   * class at `parts > 0` — if every locked ship is at 0 (or all are
+   * already unlocked), this is a no-op and returns null.
+   *
+   * Mutates `save` in place; caller is responsible for persisting.
+   * Returns the class whose count was decremented + its new count so
+   * the HUD can toast "Lost a piece of VIPER (1/10)".
+   */
+  deductPart(save: SaveData): { cls: ShipClass; count: number } | null {
+    // Candidates: classes that are still locked AND have at least one
+    // part collected. Unlocked ships are immune — they've already been
+    // "rebuilt", no parts to forfeit.
+    const candidates = SHIP_CLASSES.filter(
+      (cls) =>
+        cls !== 'falcon' &&
+        !save.unlockedShips.includes(cls) &&
+        (save.shipParts[cls] ?? 0) > 0,
+    );
+    if (candidates.length === 0) return null;
+    const cls = candidates[Math.floor(Math.random() * candidates.length)];
+    const next = Math.max(0, (save.shipParts[cls] ?? 0) - 1);
+    save.shipParts[cls] = next;
+    return { cls, count: next };
+  },
+
+  /**
    * Build a default save blob for a brand-new player. Only Falcon is
    * unlocked; every puzzle stage is at 0; no parts collected yet.
    */

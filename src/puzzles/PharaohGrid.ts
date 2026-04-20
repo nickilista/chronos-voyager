@@ -26,7 +26,7 @@ import { Puzzle } from './PuzzleBase.ts';
 
 /* ── Config ──────────────────────────────────────────────────────── */
 
-const DEFAULT_BASE = [3, 5, 2, 4];
+const DEFAULT_BASE = [3, 7, 2, 5, 4, 6];
 const C_ACCENT = '#C9A84C';
 const C_CREAM = '#F5E6CC';
 const C_SUCCESS = '#00B894';

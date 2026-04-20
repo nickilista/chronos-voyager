@@ -104,7 +104,7 @@ export class CryptarithmeticPuzzle extends Puzzle {
   readonly instructions =
     'Each letter stands for a unique digit 0–9. Assign digits so the addition is correct. Leading letters cannot be zero.';
 
-  private level = 2;
+  private level = 5;
   private wordA = '';
   private wordB = '';
   private wordResult = '';
