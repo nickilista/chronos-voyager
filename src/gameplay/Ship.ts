@@ -1,370 +1,258 @@
-import {
-  BoxGeometry,
-  CapsuleGeometry,
-  Color,
-  ConeGeometry,
-  CylinderGeometry,
-  DoubleSide,
-  ExtrudeGeometry,
-  Group,
-  Mesh,
-  MeshBasicMaterial,
-  MeshPhysicalMaterial,
-  MeshStandardMaterial,
-  Object3D,
-  PointLight,
-  Shape,
-  SphereGeometry,
-  TorusGeometry,
-  Vector3,
-} from 'three';
+import { Euler, Group, Quaternion, Vector3 } from 'three';
+import { Assets } from './Assets.ts';
 import type { InputState } from '../core/Input.ts';
+import { CORRIDOR_RADIUS } from './Track.ts';
 
-const FORWARD_SPEED = 40;
-const BOOST_MULTIPLIER = 1.6;
+const FORWARD_SPEED = 48;
+const BOOST_MULTIPLIER = 2;
 const LATERAL_ACCEL = 60;
 const LATERAL_DAMP = 6;
-const MAX_LATERAL_VEL = 18;
-const BOUNDS_X = 14;
-const BOUNDS_Y = 8;
+const MAX_LATERAL_VEL = 28;
+
+const SHIP_SCALE = 2.4;
+
+const STUN_DURATION = 0.75;
+const STUN_MIN_FACTOR = 0.18;
+
+// Outside the corridor, x/y are applied as rotations around the ship's own
+// local axes (not world axes), so "left" is always the ship's own left no
+// matter which way its nose is currently pointing.
+const FREE_YAW_RATE = 2.2;
+const FREE_PITCH_RATE = 1.8;
+// How fast the ship eases back toward the active flow's axis when inside.
+const INSIDE_RETURN_RATE = 0.9;
+
+// Free-space navigation. Always-on forward thrust along the ship's own nose
+// (so "forward" is ship-relative, unlike the old world/flow-axis drift that
+// broke once 10 flows sat at arbitrary tilts). Boost doubles the accel and
+// cap. Rotation is still driven by x/y input.
+const THRUST_ACCEL = 55;
+const THRUST_DAMP = 0.9;
+const MAX_THRUST_SPEED = 45;
+
+// Distance past the corridor wall where the ship re-emerges on exit. Large
+// enough that the next frame's outsideFactor stays > 0.5 (so we don't snap
+// again) and the player visually registers "I'm out now".
+const EXIT_RADIAL_MARGIN = 18;
+
+const FORWARD_LOCAL = new Vector3(0, 0, -1);
+const LOCAL_Y = new Vector3(0, 1, 0);
+const LOCAL_X = new Vector3(1, 0, 0);
 
 /**
- * Premium spaceship: multi-segment hull, glass cockpit w/ interior dashboard,
- * swept delta wings w/ winglet lights, twin engine nacelles, emissive seam
- * lines. Exposes `pilotSlot: Group` so era-specific avatars can be attached.
+ * Per-frame context telling the ship which flow is currently nearest, so
+ * inside-mode motion and orientation ease can align to that flow's tilted
+ * axis rather than world -Z.
+ */
+export interface ShipUpdateContext {
+  outsideFactor: number;
+  /** World-space unit vector, direction of ship travel through the flow. */
+  flowAxis: Vector3;
+  /** Rotates flow-local vectors (local -Z forward) into world space. */
+  flowQuaternion: Quaternion;
+  /** World-space origin of the active flow — needed to snap onto its axis. */
+  flowOrigin: Vector3;
+  /** Ship position in the active flow's local frame — used for exit-ease side. */
+  localShipPos: Vector3;
+}
+
+/**
+ * GLB-backed ship. Call `init()` after `preloadAssets()` has resolved.
+ * Nose is authored along -Z (glTF forward).
+ *
+ * Orientation model:
+ *   • `orient` is the ship's world-space orientation as a Quaternion.
+ *   • In free space, pitch/yaw input produces rotations around the ship's
+ *     OWN local X/Y axes (post-multiply). That makes controls ship-relative:
+ *     pushing left always yaws the ship to its own left, no matter which way
+ *     the nose is currently pointing (upside-down, inverted, mid-loop, etc.).
+ *   • Inside a flow, the orientation eases toward "forward = flowAxis" via a
+ *     swing quaternion, preserving any accumulated twist (no unwinding rolls).
+ *   • Lateral velocity is tracked in the flow's local frame, then rotated
+ *     into world coordinates for the actual position update, so banking left
+ *     while flying through a tilted flow feels the same as banking left in
+ *     the Egyptian corridor.
  */
 export class Ship {
   readonly group = new Group();
+  /** Lateral velocity expressed in world frame (for camera drift, HUD speedo). */
   readonly velocity = new Vector3();
-  /** Anchor where an era-specific pilot avatar is attached. Replace children to swap. */
-  readonly pilotSlot = new Group();
+  /** Lateral velocity in the active flow's local frame (side/up). */
+  private readonly latVelLocal = new Vector3();
+  private stunT = 0;
+  /** Ship's world-space orientation. Nose = orient * (0,0,-1). */
+  private readonly orient = new Quaternion();
+  private readonly thrustVel = new Vector3();
+  private readonly _qDelta = new Quaternion();
+  private readonly _qSwing = new Quaternion();
+  private readonly _qTarget = new Quaternion();
+  private readonly _cosmetic = new Quaternion();
+  private readonly _qFinal = new Quaternion();
+  private readonly _eul = new Euler();
+  private readonly _forward = new Vector3();
+  private readonly _scratch = new Vector3();
+  private wasFree = false;
 
-  private readonly eraEmissives: MeshStandardMaterial[] = [];
-  private readonly eraBasics: MeshBasicMaterial[] = [];
-  private readonly placeholderPilot: Object3D;
-  private readonly thrusterMat: MeshStandardMaterial;
-  private readonly thrusterLights: PointLight[] = [];
-
-  constructor(eraAccentHex = 0xffd27f) {
-    const hullColor = 0xd8dce5;
-    const hullDark = 0x4a5060;
-
-    // === Main fuselage: stretched capsule + nose cone for sleek silhouette ===
-    const bodyMat = new MeshStandardMaterial({
-      color: hullColor,
-      roughness: 0.3,
-      metalness: 0.85,
-    });
-    const body = new Mesh(new CapsuleGeometry(0.55, 1.8, 10, 18), bodyMat);
-    body.rotation.x = Math.PI / 2;
-    this.group.add(body);
-
-    const nose = new Mesh(new ConeGeometry(0.55, 1.0, 18), bodyMat);
-    nose.rotation.x = -Math.PI / 2;
-    nose.position.z = -1.85;
-    this.group.add(nose);
-
-    // Lower hull belly — wider, darker, gives a sense of mass
-    const bellyMat = new MeshStandardMaterial({
-      color: hullDark,
-      roughness: 0.5,
-      metalness: 0.7,
-    });
-    const belly = new Mesh(new CapsuleGeometry(0.45, 1.6, 6, 12), bellyMat);
-    belly.rotation.x = Math.PI / 2;
-    belly.position.set(0, -0.35, 0.1);
-    belly.scale.set(1.4, 0.55, 1);
-    this.group.add(belly);
-
-    // === Glass cockpit canopy (half-sphere clipped) ===
-    const canopyGlass = new MeshPhysicalMaterial({
-      color: 0x88aadd,
-      roughness: 0.02,
-      metalness: 0,
-      transmission: 0.85,
-      thickness: 0.25,
-      ior: 1.45,
-      clearcoat: 1,
-      clearcoatRoughness: 0.05,
-      transparent: true,
-      side: DoubleSide,
-    });
-    const canopy = new Mesh(
-      new SphereGeometry(0.5, 20, 16, 0, Math.PI * 2, 0, Math.PI / 2),
-      canopyGlass,
-    );
-    canopy.position.set(0, 0.35, -0.55);
-    canopy.scale.set(1.2, 0.8, 1.6);
-    this.group.add(canopy);
-
-    // Cockpit interior base (where pilot sits)
-    const cockpitFloor = new Mesh(
-      new BoxGeometry(0.9, 0.08, 1.4),
-      new MeshStandardMaterial({ color: 0x1a1d26, roughness: 0.8, metalness: 0.2 }),
-    );
-    cockpitFloor.position.set(0, 0.12, -0.5);
-    this.group.add(cockpitFloor);
-
-    // Dashboard panel in front of pilot — era-tinted emissive
-    const dashboardMat = new MeshStandardMaterial({
-      color: 0x050709,
-      emissive: new Color(eraAccentHex),
-      emissiveIntensity: 0.9,
-      roughness: 0.5,
-      metalness: 0.4,
-    });
-    this.eraEmissives.push(dashboardMat);
-    const dashboard = new Mesh(new BoxGeometry(0.7, 0.15, 0.25), dashboardMat);
-    dashboard.position.set(0, 0.22, -1.0);
-    dashboard.rotation.x = -0.35;
-    this.group.add(dashboard);
-
-    // Small screen readouts — 3 bright emissive rectangles
-    for (let i = 0; i < 3; i++) {
-      const screenMat = new MeshBasicMaterial({ color: new Color(eraAccentHex) });
-      this.eraBasics.push(screenMat);
-      const screen = new Mesh(new BoxGeometry(0.14, 0.06, 0.01), screenMat);
-      screen.position.set((i - 1) * 0.2, 0.28, -0.93);
-      screen.rotation.x = -0.35;
-      this.group.add(screen);
-    }
-
-    // Pilot seat — simple back panel
-    const seat = new Mesh(
-      new BoxGeometry(0.35, 0.6, 0.08),
-      new MeshStandardMaterial({ color: 0x221a28, roughness: 0.9, metalness: 0.1 }),
-    );
-    seat.position.set(0, 0.35, -0.2);
-    seat.rotation.x = 0.2;
-    this.group.add(seat);
-
-    // === Pilot slot — empty Group where era-specific avatar can be attached ===
-    this.pilotSlot.position.set(0, 0.35, -0.45);
-    this.group.add(this.pilotSlot);
-
-    // Placeholder pilot — cloaked figure, era-tinted
-    this.placeholderPilot = buildPlaceholderPilot(eraAccentHex);
-    this.pilotSlot.add(this.placeholderPilot);
-
-    // Interior cockpit light so pilot is readable through the glass
-    const cockpitLight = new PointLight(eraAccentHex, 1.4, 2.5, 2);
-    cockpitLight.position.set(0, 0.5, -0.5);
-    this.group.add(cockpitLight);
-
-    // === Delta swept wings ===
-    const wingMat = new MeshStandardMaterial({
-      color: 0x6a7080,
-      roughness: 0.45,
-      metalness: 0.75,
-    });
-    const wingShape = new Shape();
-    wingShape.moveTo(0, 0);
-    wingShape.lineTo(1.8, -0.4);
-    wingShape.lineTo(1.55, -0.7);
-    wingShape.lineTo(0, -0.5);
-    wingShape.lineTo(0, 0);
-    const wingGeom = new ExtrudeGeometry(wingShape, {
-      depth: 0.06,
-      bevelEnabled: true,
-      bevelSize: 0.02,
-      bevelThickness: 0.02,
-      bevelSegments: 2,
-      steps: 1,
-    });
-    wingGeom.translate(0, 0, -0.03);
-
-    const wingR = new Mesh(wingGeom, wingMat);
-    wingR.position.set(0.35, -0.08, 0.2);
-    this.group.add(wingR);
-
-    const wingL = new Mesh(wingGeom, wingMat);
-    wingL.position.set(-0.35, -0.08, 0.2);
-    wingL.scale.x = -1;
-    this.group.add(wingL);
-
-    // Winglet lights (blinking accents at wing tips)
-    for (const side of [-1, 1]) {
-      const tipMat = new MeshBasicMaterial({ color: new Color(eraAccentHex) });
-      this.eraBasics.push(tipMat);
-      const tip = new Mesh(new SphereGeometry(0.07, 10, 8), tipMat);
-      tip.position.set(side * 2.15, -0.08, -0.2);
-      this.group.add(tip);
-
-      const tipLight = new PointLight(eraAccentHex, 0.8, 3, 2);
-      tipLight.position.copy(tip.position);
-      this.group.add(tipLight);
-    }
-
-    // Dorsal fin
-    const fin = new Mesh(
-      new BoxGeometry(0.08, 0.55, 0.7),
-      new MeshStandardMaterial({ color: hullColor, roughness: 0.4, metalness: 0.8 }),
-    );
-    fin.position.set(0, 0.4, 0.65);
-    this.group.add(fin);
-
-    // === Twin engine nacelles ===
-    const nacelleMat = new MeshStandardMaterial({
-      color: 0x2d3240,
-      roughness: 0.35,
-      metalness: 0.9,
-    });
-    const thrusterRingMat = new MeshStandardMaterial({
-      color: 0x0c0e13,
-      roughness: 0.6,
-      metalness: 0.2,
-    });
-    this.thrusterMat = new MeshStandardMaterial({
-      color: 0x2a0f06,
-      emissive: 0xff6622,
-      emissiveIntensity: 3,
-      roughness: 0.45,
-    });
-
-    for (const side of [-1, 1]) {
-      const nacelle = new Mesh(
-        new CylinderGeometry(0.25, 0.28, 1.0, 14),
-        nacelleMat,
-      );
-      nacelle.rotation.x = Math.PI / 2;
-      nacelle.position.set(side * 0.75, -0.15, 0.55);
-      this.group.add(nacelle);
-
-      const ring = new Mesh(new TorusGeometry(0.3, 0.04, 8, 18), thrusterRingMat);
-      ring.position.set(side * 0.75, -0.15, 1.05);
-      this.group.add(ring);
-
-      const thruster = new Mesh(
-        new CylinderGeometry(0.22, 0.3, 0.25, 14),
-        this.thrusterMat,
-      );
-      thruster.rotation.x = Math.PI / 2;
-      thruster.position.set(side * 0.75, -0.15, 1.15);
-      this.group.add(thruster);
-
-      const glow = new PointLight(0xff6622, 2, 5, 1.5);
-      glow.position.set(side * 0.75, -0.15, 1.35);
-      this.group.add(glow);
-      this.thrusterLights.push(glow);
-    }
-
-    // === Emissive seam / greeble lines along fuselage (era-tinted) ===
-    const seamMat = new MeshBasicMaterial({ color: new Color(eraAccentHex) });
-    this.eraBasics.push(seamMat);
-    for (let i = 0; i < 2; i++) {
-      const seam = new Mesh(new BoxGeometry(0.02, 0.02, 2.4), seamMat);
-      seam.position.set((i === 0 ? 1 : -1) * 0.45, 0.0, -0.1);
-      this.group.add(seam);
-    }
-    // Top spine seam
-    const spine = new Mesh(new BoxGeometry(0.025, 0.025, 2.2), seamMat);
-    spine.position.set(0, 0.58, 0.0);
-    this.group.add(spine);
+  init(): void {
+    const model = Assets.cloneShip();
+    model.scale.setScalar(SHIP_SCALE);
+    model.rotation.y = Math.PI / 2;
+    this.group.add(model);
   }
 
-  setEraAccent(accentHex: number): void {
-    const c = new Color(accentHex);
-    for (const m of this.eraEmissives) m.emissive.copy(c);
-    for (const m of this.eraBasics) m.color.copy(c);
-    // Update placeholder pilot tint
-    this.placeholderPilot.traverse((o) => {
-      const mesh = o as Mesh;
-      if (mesh.isMesh) {
-        const mat = mesh.material as MeshStandardMaterial;
-        if (mat.userData.isPilotTinted) mat.emissive.copy(c);
+  setEraAccent(_accentHex: number): void {
+    // no-op for v1
+  }
+
+  stun(): void {
+    this.stunT = STUN_DURATION;
+    this.velocity.multiplyScalar(0.15);
+    this.latVelLocal.multiplyScalar(0.15);
+    this.thrustVel.multiplyScalar(0.15);
+  }
+
+  update(dt: number, input: InputState, ctx: ShipUpdateContext): void {
+    const { outsideFactor, flowAxis, flowQuaternion, flowOrigin, localShipPos } = ctx;
+
+    let speedFactor = 1;
+    if (this.stunT > 0) {
+      const k = this.stunT / STUN_DURATION;
+      speedFactor = STUN_MIN_FACTOR + (1 - STUN_MIN_FACTOR) * (1 - k);
+      this.stunT = Math.max(0, this.stunT - dt);
+    }
+    const boostMul = input.boost ? BOOST_MULTIPLIER : 1;
+    const speed = FORWARD_SPEED * boostMul * speedFactor;
+
+    const free = outsideFactor > 0.5;
+
+    // Entry snap: on the outside→inside transition, center the ship on the
+    // flow's axis and align its nose with the flow's forward direction so the
+    // player always starts play in a canonical pose, no matter which angle
+    // they crossed the boundary at.
+    if (this.wasFree && !free) {
+      this._scratch.subVectors(this.group.position, flowOrigin);
+      const axial = this._scratch.dot(flowAxis);
+      this.group.position
+        .copy(flowAxis)
+        .multiplyScalar(axial)
+        .add(flowOrigin);
+      this.orient.copy(flowQuaternion);
+      this.latVelLocal.set(0, 0, 0);
+      this.thrustVel.set(0, 0, 0);
+    }
+
+    if (free) {
+      // Exit snap: on inside→outside, pop the ship out just past the corridor
+      // wall on the same side where it crossed, at axial=0 (the "mouth" of
+      // the tube near the flow origin). Snapping straight to flowOrigin would
+      // land the ship back on the axis (inside the cylinder) — outsideFactor
+      // would drop to 0 and the ship would re-enter the flow immediately.
+      if (!this.wasFree) {
+        const rx = localShipPos.x;
+        const ry = localShipPos.y;
+        const r = Math.hypot(rx, ry);
+        let ux = 1;
+        let uy = 0;
+        if (r > 1e-4) {
+          ux = rx / r;
+          uy = ry / r;
+        }
+        this._scratch.set(
+          ux * (CORRIDOR_RADIUS + EXIT_RADIAL_MARGIN),
+          uy * (CORRIDOR_RADIUS + EXIT_RADIAL_MARGIN),
+          0,
+        );
+        this._scratch.applyQuaternion(flowQuaternion);
+        this.group.position.copy(flowOrigin).add(this._scratch);
+        this.thrustVel.set(0, 0, 0);
+        this.latVelLocal.set(0, 0, 0);
       }
-    });
-  }
 
-  /** Replace placeholder with an era-specific avatar mesh. */
-  setPilotAvatar(avatar: Object3D): void {
-    while (this.pilotSlot.children.length > 0) {
-      this.pilotSlot.remove(this.pilotSlot.children[0]);
+      // Ship-relative rotations. Post-multiplying a local-axis rotation onto
+      // `orient` means the axis is interpreted in the ship's own frame, so
+      // left/right always maps to the ship's own left/right regardless of
+      // world orientation. Yaw: around local +Y. Pitch: around local +X.
+      if (input.x !== 0) {
+        this._qDelta.setFromAxisAngle(LOCAL_Y, -input.x * FREE_YAW_RATE * dt);
+        this.orient.multiply(this._qDelta);
+      }
+      if (input.y !== 0) {
+        this._qDelta.setFromAxisAngle(LOCAL_X, input.y * FREE_PITCH_RATE * dt);
+        this.orient.multiply(this._qDelta);
+      }
+
+      // Lateral in-flow velocity fades when outside.
+      const dmp = Math.exp(-LATERAL_DAMP * dt);
+      this.latVelLocal.multiplyScalar(dmp);
+
+      // Always-on forward thrust along the ship's own nose. Boost (Space)
+      // doubles accel and the speed cap so the player has an explicit
+      // "go faster" control while free motion remains the default.
+      this._forward.copy(FORWARD_LOCAL).applyQuaternion(this.orient);
+      this.thrustVel.addScaledVector(this._forward, THRUST_ACCEL * boostMul * dt);
+      const maxSpd = MAX_THRUST_SPEED * boostMul;
+      if (this.thrustVel.length() > maxSpd) {
+        this.thrustVel.setLength(maxSpd);
+      }
+      const tdmp = Math.exp(-THRUST_DAMP * dt);
+      this.thrustVel.multiplyScalar(tdmp);
+
+      this.group.position.addScaledVector(this.thrustVel, dt * speedFactor);
+    } else {
+      // Constrained corridor flight. Lateral acceleration is in flow-local
+      // frame (x = local side, y = local up), then rotated into world for the
+      // position update so the ship banks the way you'd expect no matter how
+      // the flow is tilted in 3D space.
+      this.latVelLocal.x += input.x * LATERAL_ACCEL * dt;
+      this.latVelLocal.y += input.y * LATERAL_ACCEL * dt;
+      const damp = Math.exp(-LATERAL_DAMP * dt);
+      if (input.x === 0) this.latVelLocal.x *= damp;
+      if (input.y === 0) this.latVelLocal.y *= damp;
+      this.latVelLocal.x = clampN(this.latVelLocal.x, -MAX_LATERAL_VEL, MAX_LATERAL_VEL);
+      this.latVelLocal.y = clampN(this.latVelLocal.y, -MAX_LATERAL_VEL, MAX_LATERAL_VEL);
+
+      // Ease the ship toward "nose = flowAxis" via swing quaternion. This
+      // preserves any accumulated roll (the ship won't unwind a completed
+      // loop) and handles any 3D axis without Euler singularities.
+      this._forward.copy(FORWARD_LOCAL).applyQuaternion(this.orient);
+      this._qSwing.setFromUnitVectors(this._forward, flowAxis);
+      this._qTarget.copy(this._qSwing).multiply(this.orient);
+      const k = Math.min(1, dt * INSIDE_RETURN_RATE);
+      this.orient.slerp(this._qTarget, k);
+
+      const tdmp = Math.exp(-THRUST_DAMP * 3 * dt);
+      this.thrustVel.multiplyScalar(tdmp);
+
+      this._scratch.set(this.latVelLocal.x * dt, this.latVelLocal.y * dt, 0);
+      this._scratch.applyQuaternion(flowQuaternion);
+      this.group.position.add(this._scratch);
+      this.group.position.addScaledVector(flowAxis, speed * dt);
     }
-    this.pilotSlot.add(avatar);
-  }
 
-  update(dt: number, input: InputState): void {
-    const speed = input.boost ? FORWARD_SPEED * BOOST_MULTIPLIER : FORWARD_SPEED;
+    // Export world-frame lateral velocity for camera drift / HUD.
+    this._scratch.set(this.latVelLocal.x, this.latVelLocal.y, 0);
+    this._scratch.applyQuaternion(flowQuaternion);
+    this.velocity.copy(this._scratch);
 
-    // Thruster intensity pulses with boost
-    const targetEmissive = input.boost ? 5 : 3;
-    this.thrusterMat.emissiveIntensity +=
-      (targetEmissive - this.thrusterMat.emissiveIntensity) * Math.min(1, dt * 8);
-    for (const l of this.thrusterLights) {
-      const targetInt = input.boost ? 3.5 : 2;
-      l.intensity += (targetInt - l.intensity) * Math.min(1, dt * 8);
-    }
+    // Cosmetic roll/pitch from lateral velocity. Expressed in local frame via
+    // post-multiply, so the roll axis is always the ship's own forward.
+    // Fade in with alignment so re-entering upside-down doesn't add fight rolls.
+    this._forward.copy(FORWARD_LOCAL).applyQuaternion(this.orient);
+    const alignDot = this._forward.dot(flowAxis);
+    const aligned = Math.max(0, alignDot);
+    const cosmeticStrength = aligned * aligned;
+    const targetRoll = -this.latVelLocal.x * 0.04 * cosmeticStrength;
+    const targetPitchCosmetic = this.latVelLocal.y * 0.03 * cosmeticStrength;
+    this._eul.set(targetPitchCosmetic, 0, targetRoll, 'YXZ');
+    this._cosmetic.setFromEuler(this._eul);
 
-    this.velocity.x += input.x * LATERAL_ACCEL * dt;
-    this.velocity.y += input.y * LATERAL_ACCEL * dt;
-    const damp = Math.exp(-LATERAL_DAMP * dt);
-    this.velocity.x *= input.x === 0 ? damp : 1;
-    this.velocity.y *= input.y === 0 ? damp : 1;
-    this.velocity.x = clamp(this.velocity.x, -MAX_LATERAL_VEL, MAX_LATERAL_VEL);
-    this.velocity.y = clamp(this.velocity.y, -MAX_LATERAL_VEL, MAX_LATERAL_VEL);
+    this._qFinal.copy(this.orient).multiply(this._cosmetic);
+    this.group.quaternion.slerp(this._qFinal, free ? 1 : Math.min(1, dt * 6));
 
-    this.group.position.x += this.velocity.x * dt;
-    this.group.position.y += this.velocity.y * dt;
-    this.group.position.z -= speed * dt;
-
-    if (Math.abs(this.group.position.x) > BOUNDS_X) {
-      this.group.position.x = Math.sign(this.group.position.x) * BOUNDS_X;
-      this.velocity.x = 0;
-    }
-    if (Math.abs(this.group.position.y) > BOUNDS_Y) {
-      this.group.position.y = Math.sign(this.group.position.y) * BOUNDS_Y;
-      this.velocity.y = 0;
-    }
-
-    const targetRoll = -this.velocity.x * 0.04;
-    this.group.rotation.z += (targetRoll - this.group.rotation.z) * Math.min(1, dt * 8);
-    const targetPitch = -this.velocity.y * 0.03;
-    this.group.rotation.x += (targetPitch - this.group.rotation.x) * Math.min(1, dt * 8);
+    this.wasFree = free;
   }
 }
 
-function buildPlaceholderPilot(tintHex: number): Object3D {
-  const g = new Group();
-  const skinMat = new MeshStandardMaterial({
-    color: 0x2a2430,
-    roughness: 0.85,
-    metalness: 0.05,
-    emissive: new Color(tintHex),
-    emissiveIntensity: 0.25,
-  });
-  skinMat.userData.isPilotTinted = true;
-
-  const suitMat = new MeshStandardMaterial({
-    color: 0x151821,
-    roughness: 0.7,
-    metalness: 0.3,
-  });
-
-  const torso = new Mesh(new CapsuleGeometry(0.14, 0.28, 6, 10), suitMat);
-  torso.position.set(0, 0.2, 0);
-  g.add(torso);
-
-  const head = new Mesh(new SphereGeometry(0.11, 14, 12), skinMat);
-  head.position.set(0, 0.5, -0.02);
-  g.add(head);
-
-  // Small hood/helmet cap tinted with era accent
-  const capMat = new MeshStandardMaterial({
-    color: 0x0a0d14,
-    roughness: 0.6,
-    metalness: 0.4,
-    emissive: new Color(tintHex),
-    emissiveIntensity: 0.6,
-  });
-  capMat.userData.isPilotTinted = true;
-  const cap = new Mesh(new SphereGeometry(0.12, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), capMat);
-  cap.position.set(0, 0.55, -0.02);
-  g.add(cap);
-
-  return g;
-}
-
-function clamp(v: number, lo: number, hi: number): number {
+function clampN(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
 }

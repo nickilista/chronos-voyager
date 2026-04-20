@@ -23,3 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 .vercel
+
+# Local scratch workspace (3D tool task logs, experimental outputs)
+.scratch/
