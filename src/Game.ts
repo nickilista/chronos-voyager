@@ -1283,7 +1283,11 @@ export class Game {
     this.skybox.setFlowOrientation(activeFlow.inverseQuaternion);
     this.celestial.setInsideFactor(1 - outside);
     this.updateFog(outside);
-    this.celestial.update(dt, this.camera.position, activeFlow.quaternion);
+    // NOTE: celestial.update moved below to run AFTER the camera-follow
+    // step. Calling it here meant the gods used last frame's camera
+    // position (which still included last frame's random shake jitter) —
+    // result: visibly shaky/stuttering figures in the sky. We now anchor
+    // them to the clean, shake-free `_smoothCamPos` computed this frame.
     // Skybox scroll loosely follows travel so the stars animate. Use the
     // ship's signed axial progress through the active flow for the sign.
     this.skybox.update(dt, -this._scratchLocalShip.z * 0.004);
@@ -1333,6 +1337,14 @@ export class Game {
     }
     this._wasFree = freeNow;
     this.camera.position.copy(this._smoothCamPos);
+
+    // Celestial pantheon update — AFTER `_smoothCamPos` is settled but
+    // BEFORE the random camera shake below. The gods anchor to the
+    // smooth (shake-free) position so they stay rock-steady in world
+    // space; the subsequent shake perturbs the camera view, producing
+    // natural parallax rather than the figures dancing with every
+    // random offset.
+    this.celestial.update(dt, this._smoothCamPos, activeFlow.quaternion);
 
     const shipUp = this._scratchD
       .set(0, 1, 0)
