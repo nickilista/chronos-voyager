@@ -8,11 +8,17 @@ import {
 } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { ERA_CONTENT } from '../eras/eraContent.ts';
+import type { EraId } from '../eras/eras.ts';
 
 /**
- * Central GLB asset store. Loads every per-era model once at startup and
- * hands out deep clones to the gameplay systems that need independent
- * transforms per instance (obstacles, decorations, collectibles, ship).
+ * Central GLB asset store. Lazy-loads per-era models on demand and hands
+ * out deep clones to the gameplay systems that need independent transforms
+ * per instance (obstacles, decorations, collectibles, ship).
+ *
+ * At boot only the HDRI environment map, Egypt models (pyramid, obelisk),
+ * and engine-trail effects are fetched (~6 MB). Other eras are loaded when
+ * the player approaches them, cutting the initial download from ~64 MB.
  *
  * Per-era content lives in `src/eras/eraContent.ts`; this file just owns
  * the cache / loader.
@@ -77,21 +83,71 @@ function modelUrl(name: ModelName): string {
 const models = new Map<ModelName, Group>();
 let envHDR: DataTexture | null = null;
 
+/** Shared loader instance — reused across preload and lazy-load calls. */
+const gltfLoader = new GLTFLoader();
+
+function fetchScene(url: string): Promise<Group> {
+  return gltfLoader.loadAsync(url).then((g) => g.scene as unknown as Group);
+}
+
+/**
+ * Boot-time preload: HDRI + Egypt era models + engine trail effects.
+ * This is all the player needs to start playing (~6 MB). Other eras are
+ * loaded lazily via `loadEraModels()`.
+ */
 export async function preloadAssets(): Promise<void> {
   if (envHDR) return;
-  const loader = new GLTFLoader();
   const rgbe = new RGBELoader();
-  const fetchScene = (url: string) =>
-    loader.loadAsync(url).then((g) => g.scene as unknown as Group);
-  // 'ankh' is built procedurally — don't fetch the legacy key-shaped GLB.
-  const toFetch = MODEL_NAMES.filter((n) => n !== 'ankh');
-  const modelPromises = toFetch.map((n) => fetchScene(modelUrl(n)));
+  // Only load Egypt + effects at boot. 'ankh' is procedural.
+  const bootModels: ModelName[] = [
+    'pyramid',
+    'obelisk',
+    'engine_trail',
+    'engine_trail_core',
+  ];
+  const modelPromises = bootModels.map((n) => fetchScene(modelUrl(n)));
   const [modelResults, hdr] = await Promise.all([
     Promise.all(modelPromises),
     rgbe.loadAsync('/hdri/desert_1k.hdr'),
   ]);
-  toFetch.forEach((n, i) => models.set(n, modelResults[i]));
+  bootModels.forEach((n, i) => models.set(n, modelResults[i]));
   envHDR = hdr;
+}
+
+/**
+ * In-flight loading promises keyed by era. Prevents duplicate fetches when
+ * `loadEraModels` is called multiple times for the same era concurrently.
+ */
+const eraLoadPromises = new Map<EraId, Promise<void>>();
+
+/**
+ * Load the 2-3 GLB models required by a specific era. No-op if the models
+ * are already cached. Safe to call concurrently — duplicate fetches are
+ * deduplicated.
+ */
+export async function loadEraModels(eraId: EraId): Promise<void> {
+  // Collect the model names this era needs.
+  const content = ERA_CONTENT[eraId];
+  const needed: ModelName[] = [];
+  for (const obs of content.obstacles) {
+    if (obs.name !== 'ankh' && !models.has(obs.name)) needed.push(obs.name);
+  }
+  if (content.collectible.name !== 'ankh' && !models.has(content.collectible.name)) {
+    needed.push(content.collectible.name);
+  }
+  if (needed.length === 0) return;
+
+  // Deduplicate concurrent calls for the same era.
+  if (eraLoadPromises.has(eraId)) {
+    return eraLoadPromises.get(eraId)!;
+  }
+
+  const promise = (async () => {
+    const results = await Promise.all(needed.map((n) => fetchScene(modelUrl(n))));
+    needed.forEach((n, i) => models.set(n, results[i]));
+  })();
+  eraLoadPromises.set(eraId, promise);
+  await promise;
 }
 
 export function getEnvHDR(): DataTexture {
@@ -135,7 +191,22 @@ function buildAnkh(): Group {
 function cloneByName(name: ModelName): Group {
   if (name === 'ankh') return buildAnkh();
   const m = models.get(name);
-  if (!m) throw new Error(`Assets model "${name}" not loaded — call preloadAssets() first`);
+  if (!m) {
+    // Model not yet loaded — return a tiny placeholder box so callers don't
+    // crash. This path should only fire if `loadEraModels()` wasn't awaited
+    // before building meshes; the placeholder is intentionally visible (pink)
+    // so it's obvious in dev builds.
+    // eslint-disable-next-line no-console
+    console.warn(`Assets.clone("${name}"): model not loaded yet, returning placeholder`);
+    const placeholder = new Group();
+    placeholder.add(
+      new Mesh(
+        new BoxGeometry(0.5, 0.5, 0.5),
+        new MeshStandardMaterial({ color: 0xff00ff }),
+      ),
+    );
+    return placeholder;
+  }
   return m.clone(true);
 }
 

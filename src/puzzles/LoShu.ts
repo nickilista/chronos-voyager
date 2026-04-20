@@ -31,8 +31,8 @@ import { Puzzle } from './PuzzleBase.ts';
 const N = 3;
 const MAGIC = 15; // n(n²+1)/2
 const BLANKS = 8; // max difficulty: only 1 given cell
-const CELL_PX = 72;
-const BOARD_PX = N * CELL_PX;
+function CELL_PX(): number { return Math.min(72, Math.floor((Math.min(window.innerWidth, 600) - 48) / N)); }
+function BOARD_PX(): number { return N * CELL_PX(); }
 
 /* ── Colors (Chinese jade/gold aesthetic, matches iOS) ────────── */
 
@@ -288,8 +288,8 @@ export class LoShuPuzzle extends Puzzle {
 
     // Board wrapper (canvas for grid)
     const SUM_MARGIN = 36;
-    const totalW = BOARD_PX + SUM_MARGIN + 8;
-    const totalH = BOARD_PX + SUM_MARGIN + 8;
+    const totalW = BOARD_PX() + SUM_MARGIN + 8;
+    const totalH = BOARD_PX() + SUM_MARGIN + 8;
     const boardWrap = document.createElement('div');
     Object.assign(boardWrap.style, {
       position: 'relative', width: totalW + 'px', height: totalH + 'px',
@@ -385,8 +385,8 @@ export class LoShuPuzzle extends Puzzle {
   private drawBoard(): void {
     const c = this.ctx2d!;
     const SUM_MARGIN = 36;
-    const totalW = BOARD_PX + SUM_MARGIN + 8;
-    const totalH = BOARD_PX + SUM_MARGIN + 8;
+    const totalW = BOARD_PX() + SUM_MARGIN + 8;
+    const totalH = BOARD_PX() + SUM_MARGIN + 8;
     const s = 2;
     c.clearRect(0, 0, totalW * s, totalH * s);
     c.save();
@@ -398,8 +398,8 @@ export class LoShuPuzzle extends Puzzle {
     // Draw cells
     for (let row = 0; row < N; row++) {
       for (let col = 0; col < N; col++) {
-        const x = gridOffX + col * CELL_PX;
-        const y = gridOffY + row * CELL_PX;
+        const x = gridOffX + col * CELL_PX();
+        const y = gridOffY + row * CELL_PX();
         const value = this.grid[row][col];
         const isGiven = this.given[row][col];
         const isSel = this.selected?.row === row && this.selected?.col === col;
@@ -413,7 +413,7 @@ export class LoShuPuzzle extends Puzzle {
         else fill = C_CELL_BG;
 
         // Rounded rect
-        this.fillRoundRect(c, x + 1, y + 1, CELL_PX - 2, CELL_PX - 2, 4, fill);
+        this.fillRoundRect(c, x + 1, y + 1, CELL_PX() - 2, CELL_PX() - 2, 4, fill);
 
         // Border
         let strokeColor: string;
@@ -423,7 +423,7 @@ export class LoShuPuzzle extends Puzzle {
         else if (isGiven) { strokeColor = 'rgba(212,175,55,0.4)'; strokeWidth = 1; }
         else { strokeColor = 'rgba(107,66,38,0.5)'; strokeWidth = 1; }
 
-        this.strokeRoundRect(c, x + 1, y + 1, CELL_PX - 2, CELL_PX - 2, 4, strokeColor, strokeWidth);
+        this.strokeRoundRect(c, x + 1, y + 1, CELL_PX() - 2, CELL_PX() - 2, 4, strokeColor, strokeWidth);
 
         // Value text
         if (value != null) {
@@ -431,7 +431,7 @@ export class LoShuPuzzle extends Puzzle {
           c.font = `${isGiven ? '700' : '600'} 28px Rajdhani, system-ui`;
           c.textAlign = 'center';
           c.textBaseline = 'middle';
-          c.fillText(String(value), x + CELL_PX / 2, y + CELL_PX / 2 + 1);
+          c.fillText(String(value), x + CELL_PX() / 2, y + CELL_PX() / 2 + 1);
         }
       }
     }
@@ -441,8 +441,8 @@ export class LoShuPuzzle extends Puzzle {
       const rs = rowSum(this.grid, row);
       const complete = isLineComplete(rowValues(this.grid, row));
       const correct = complete && rs === MAGIC;
-      const x = gridOffX + BOARD_PX + 8;
-      const y = gridOffY + row * CELL_PX + CELL_PX / 2;
+      const x = gridOffX + BOARD_PX() + 8;
+      const y = gridOffY + row * CELL_PX() + CELL_PX() / 2;
 
       if (rs != null) {
         c.fillStyle = correct ? C_SUCCESS : `${C_CREAM}66`;
@@ -467,8 +467,8 @@ export class LoShuPuzzle extends Puzzle {
       const cs = colSum(this.grid, col);
       const complete = isLineComplete(colValues(this.grid, col));
       const correct = complete && cs === MAGIC;
-      const x = gridOffX + col * CELL_PX + CELL_PX / 2;
-      const y = gridOffY + BOARD_PX + 12;
+      const x = gridOffX + col * CELL_PX() + CELL_PX() / 2;
+      const y = gridOffY + BOARD_PX() + 12;
 
       if (cs != null) {
         c.fillStyle = correct ? C_SUCCESS : `${C_CREAM}66`;
@@ -489,7 +489,7 @@ export class LoShuPuzzle extends Puzzle {
     }
 
     // Diagonal sum indicators (matches iOS: anti at bottom-left, main at bottom-right)
-    const diagY = gridOffY + BOARD_PX + 12;
+    const diagY = gridOffY + BOARD_PX() + 12;
 
     // Anti-diagonal (bottom-left)
     const antiS = diagSum(this.grid, true);
@@ -512,7 +512,7 @@ export class LoShuPuzzle extends Puzzle {
       c.font = 'bold 10px Rajdhani, system-ui';
       c.textAlign = 'right';
       c.textBaseline = 'top';
-      c.fillText(`${mainS} \u2572`, gridOffX + BOARD_PX + 2, diagY + 18);
+      c.fillText(`${mainS} \u2572`, gridOffX + BOARD_PX() + 2, diagY + 18);
     }
 
     // Watermark: Chinese character for "magic" (matches iOS)
@@ -522,7 +522,7 @@ export class LoShuPuzzle extends Puzzle {
     c.font = '140px serif';
     c.textAlign = 'center';
     c.textBaseline = 'middle';
-    c.translate(BOARD_PX / 2, BOARD_PX / 2);
+    c.translate(BOARD_PX() / 2, BOARD_PX() / 2);
     c.rotate(-15 * Math.PI / 180);
     c.fillText('\u9B54', 0, 0);
     c.restore();
@@ -572,8 +572,8 @@ export class LoShuPuzzle extends Puzzle {
     const my = e.clientY - rect.top;
 
     // Check if click is within the grid
-    const col = Math.floor(mx / CELL_PX);
-    const row = Math.floor(my / CELL_PX);
+    const col = Math.floor(mx / CELL_PX());
+    const row = Math.floor(my / CELL_PX());
     if (row < 0 || row >= N || col < 0 || col >= N) return;
 
     if (this.given[row][col]) return;

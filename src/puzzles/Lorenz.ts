@@ -527,7 +527,7 @@ export class LorenzPuzzle extends Puzzle {
     const brief = this.el('div', this.panelEl, {
       padding: '10px 16px', background: C_DARK_PANEL,
       border: `1px solid ${C_MATRIX}33`, borderRadius: '8px',
-      textAlign: 'center', maxWidth: '380px',
+      textAlign: 'center', maxWidth: 'min(380px, calc(100vw - 48px))',
     });
     this.el('div', brief, {
       fontSize: '13px', fontWeight: '700', color: C_MATRIX,
@@ -573,7 +573,7 @@ export class LorenzPuzzle extends Puzzle {
 
     const tapeWrap = this.el('div', this.panelEl, {
       padding: '10px', background: 'rgba(0,0,0,0.4)',
-      border: `1px solid ${C_STEEL}4d`, borderRadius: '10px', width: '100%', maxWidth: '380px',
+      border: `1px solid ${C_STEEL}4d`, borderRadius: '10px', width: '100%', maxWidth: 'min(380px, calc(100vw - 48px))',
     });
 
     // Cipher tape
@@ -633,7 +633,7 @@ export class LorenzPuzzle extends Puzzle {
     }, label);
 
     const strip = this.el('div', wrap, {
-      display: 'flex', gap: '3px', overflowX: 'auto', paddingTop: '4px', maxWidth: '360px',
+      display: 'flex', gap: '3px', overflowX: 'auto', paddingTop: '4px', maxWidth: 'min(360px, calc(100vw - 64px))',
     });
 
     for (let ci = 0; ci < bits.length; ci++) {
@@ -669,7 +669,7 @@ export class LorenzPuzzle extends Puzzle {
 
     const section = this.el('div', this.panelEl, {
       padding: '10px', background: C_DARK_PANEL,
-      border: `1px solid ${C_MATRIX}26`, borderRadius: '8px', maxWidth: '380px', width: '100%',
+      border: `1px solid ${C_MATRIX}26`, borderRadius: '8px', maxWidth: 'min(380px, calc(100vw - 48px))', width: '100%',
     });
 
     this.el('div', section, {
@@ -738,7 +738,7 @@ export class LorenzPuzzle extends Puzzle {
 
     const section = this.el('div', this.panelEl, {
       padding: '10px', background: C_DARK_PANEL,
-      border: `1px solid ${C_BRASS}33`, borderRadius: '8px', maxWidth: '380px', width: '100%',
+      border: `1px solid ${C_BRASS}33`, borderRadius: '8px', maxWidth: 'min(380px, calc(100vw - 48px))', width: '100%',
     });
 
     this.el('div', section, {
@@ -805,7 +805,7 @@ export class LorenzPuzzle extends Puzzle {
 
     const section = this.el('div', this.panelEl, {
       padding: '10px', background: C_DARK_PANEL,
-      border: `1px solid ${C_COPPER}4d`, borderRadius: '8px', maxWidth: '400px', width: '100%',
+      border: `1px solid ${C_COPPER}4d`, borderRadius: '8px', maxWidth: 'min(400px, calc(100vw - 48px))', width: '100%',
     });
 
     this.el('div', section, {

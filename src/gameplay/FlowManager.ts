@@ -165,11 +165,34 @@ export class FlowManager {
     }
   }
 
-  init(scene: Scene): void {
+  /**
+   * Initialize all flows. Egypt (index 0) is awaited so the player can
+   * start immediately. The remaining 9 eras load their models in the
+   * background — by the time the player approaches any non-Egypt flow
+   * (~5+ seconds into play), the assets are typically ready.
+   */
+  async init(scene: Scene): Promise<void> {
+    // Add all flow groups to the scene immediately (they render as empty
+    // groups until their init completes, but camera/HUD logic references
+    // them so they must exist in the scene graph).
     for (const flow of this.flows) {
-      flow.init();
       scene.add(flow.group);
     }
+    // Egypt MUST be ready at game start — the player spawns near it.
+    await this.flows[0].init();
+    // Kick off background loads for all other eras (fire-and-forget).
+    for (let i = 1; i < this.flows.length; i++) {
+      void this.flows[i].init();
+    }
+  }
+
+  /**
+   * Ensure a flow is fully initialized. If init hasn't completed yet,
+   * awaits it (may cause a brief stutter on first entry — acceptable).
+   */
+  async ensureFlowReady(flow: Flow): Promise<void> {
+    if (flow.initialized) return;
+    await flow.init();
   }
 
   update(dt: number, shipWorld: Vector3, shipVelWorld: Vector3): void {
@@ -202,10 +225,17 @@ export class FlowManager {
     const shipInFreeSpace = this.outsideFactor > 0.01;
 
     for (let i = 0; i < this.flows.length; i++) {
+      const flow = this.flows[i];
+      // Skip flows whose models haven't finished loading yet. Their groups
+      // are empty so there's nothing to render or collide against.
+      if (!flow.initialized) {
+        flow.setVisible(false);
+        continue;
+      }
       const isActive = i === nearestIndex;
       const flowOutside = isActive ? this.outsideFactor : 1;
       const flowBoundary = isActive ? this.boundaryProximity : 0;
-      this.flows[i].setVisible(isActive || shipInFreeSpace);
+      flow.setVisible(isActive || shipInFreeSpace);
       // Interior LOD — simpler rule than before: we go 'full' ONLY when
       // the ship is actually inside THIS flow's corridor tube (the
       // `!shipInFreeSpace && isActive` case). Every other condition
@@ -215,8 +245,8 @@ export class FlowManager {
       // the player got close; only crossing the aura membrane triggers
       // the full population.
       const insideThisFlow = isActive && !shipInFreeSpace;
-      this.flows[i].setInteriorLOD(insideThisFlow ? 'full' : 'sparse');
-      this.flows[i].update(
+      flow.setInteriorLOD(insideThisFlow ? 'full' : 'sparse');
+      flow.update(
         dt,
         shipWorld,
         shipVelWorld,

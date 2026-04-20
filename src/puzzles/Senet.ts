@@ -641,7 +641,7 @@ export class SenetPuzzle extends Puzzle {
       'position:absolute;left:50%;top:24px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:10px;pointer-events:auto;';
     const status = document.createElement('div');
     status.style.cssText =
-      'padding:10px 22px;border:1px solid rgba(212,168,67,0.35);border-bottom:3px solid #d4a843;background:rgba(10,6,2,0.8);backdrop-filter:blur(10px);border-radius:6px;color:#fff;letter-spacing:0.05em;font-size:14px;text-align:center;min-width:360px;';
+      'padding:10px 22px;border:1px solid rgba(212,168,67,0.35);border-bottom:3px solid #d4a843;background:rgba(10,6,2,0.8);backdrop-filter:blur(10px);border-radius:6px;color:#fff;letter-spacing:0.05em;font-size:clamp(12px,3vw,14px);text-align:center;min-width:min(360px,90vw);max-width:calc(100vw - 32px);';
     this.statusEl = status;
     const btn = document.createElement('button');
     btn.textContent = 'THROW STICKS';
@@ -658,7 +658,7 @@ export class SenetPuzzle extends Puzzle {
       'position:absolute;top:24px;left:24px;padding:8px 14px;border:1px solid rgba(212,168,67,0.4);background:rgba(10,6,2,0.7);color:#d4a843;letter-spacing:0.12em;font-weight:600;cursor:pointer;border-radius:4px;font-size:12px;pointer-events:auto;font-family:inherit;';
     const rules = document.createElement('div');
     rules.style.cssText =
-      'position:absolute;top:70px;left:24px;max-width:360px;max-height:70vh;overflow-y:auto;padding:16px 18px;border:1px solid rgba(212,168,67,0.35);background:rgba(14,8,3,0.92);backdrop-filter:blur(12px);color:#e6dcc2;border-radius:6px;font-size:12.5px;line-height:1.55;display:none;pointer-events:auto;';
+      'position:absolute;top:70px;left:24px;max-width:min(360px,calc(100vw - 48px));max-height:70vh;overflow-y:auto;padding:clamp(10px,2vw,16px) clamp(12px,3vw,18px);border:1px solid rgba(212,168,67,0.35);background:rgba(14,8,3,0.92);backdrop-filter:blur(12px);color:#e6dcc2;border-radius:6px;font-size:clamp(11px,2.5vw,12.5px);line-height:1.55;display:none;pointer-events:auto;';
     rules.innerHTML = `
       <div style="color:#d4a843;letter-spacing:0.18em;font-weight:700;font-size:12px;margin-bottom:8px">SENET · THE GAME OF PASSING</div>
       <p>Senet (𓊃𓈖𓏏 — "passing") is one of humanity's oldest board games, carved into mastabas as early as 3100 BCE and buried alongside Tutankhamun. Egyptians believed the board mirrored the journey of the soul through the Duat to reach the afterlife.</p>
@@ -742,7 +742,7 @@ export class SenetPuzzle extends Puzzle {
     const hold = opts.hold ?? BANNER_TIME;
     this.bannerTimer = hold;
     this.bannerEl.innerHTML = `
-      <div style="position:relative;min-width:360px;max-width:520px;padding:22px 34px;background:linear-gradient(180deg,${opts.bg},#0b0603);border:1px solid ${opts.color}99;border-radius:8px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,0.6),0 0 0 1px ${opts.color}33 inset;">
+      <div style="position:relative;min-width:min(360px,90vw);max-width:min(520px,calc(100vw - 32px));padding:clamp(14px,3vw,22px) clamp(18px,4vw,34px);background:linear-gradient(180deg,${opts.bg},#0b0603);border:1px solid ${opts.color}99;border-radius:8px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,0.6),0 0 0 1px ${opts.color}33 inset;">
         <div style="position:absolute;top:6px;left:6px;width:10px;height:10px;border-left:2px solid ${opts.color};border-top:2px solid ${opts.color};opacity:0.65"></div>
         <div style="position:absolute;top:6px;right:6px;width:10px;height:10px;border-right:2px solid ${opts.color};border-top:2px solid ${opts.color};opacity:0.65"></div>
         <div style="position:absolute;bottom:6px;left:6px;width:10px;height:10px;border-left:2px solid ${opts.color};border-bottom:2px solid ${opts.color};opacity:0.65"></div>
@@ -1236,7 +1236,7 @@ export class SenetPuzzle extends Puzzle {
   private renderTrap(): void {
     if (!this.trapEl || !this.trap) return;
     this.trapEl.innerHTML = `
-      <div style="width:min(92vw,420px);padding:26px 24px 20px;background:linear-gradient(180deg,#1e0f2e,#0b0612);border:1px solid #7b2d8e;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,0.7);font-family:system-ui,sans-serif;color:#ead6ff;text-align:center;">
+      <div style="width:min(92vw,420px);max-width:calc(100vw - 32px);padding:clamp(16px,3vw,26px) clamp(14px,3vw,24px) clamp(12px,2vw,20px);background:linear-gradient(180deg,#1e0f2e,#0b0612);border:1px solid #7b2d8e;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,0.7);font-family:system-ui,sans-serif;color:#ead6ff;text-align:center;">
         <div style="font-size:42px;color:#b77ccc;line-height:1">𓁹</div>
         <div style="color:#b77ccc;letter-spacing:0.18em;font-weight:700;font-size:12px;margin-top:6px">THOTH'S TRAP</div>
         <div id="trap-timer" style="margin-top:8px;font-size:13px;letter-spacing:0.1em;color:#ddc6ff">10.0s</div>

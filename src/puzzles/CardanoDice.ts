@@ -133,8 +133,8 @@ function diceCountForLevel(level: number): number {
 
 /* ── Canvas drawing helpers ──────────────────────────────────────── */
 
-const CANVAS_W = 380;
-const CANVAS_H = 400;
+function CANVAS_W(): number { return Math.min(380, window.innerWidth - 48); }
+function CANVAS_H(): number { return Math.round(CANVAS_W() * 400 / 380); }
 const DIE_SIZE = 64;
 const DIE_SPACING = 16;
 
@@ -379,9 +379,9 @@ export class CardanoDicePuzzle extends Puzzle {
 
     // Question canvas (marble tablet)
     const cvs = document.createElement('canvas');
-    cvs.width = CANVAS_W * 2;
-    cvs.height = CANVAS_H * 2;
-    Object.assign(cvs.style, { width: CANVAS_W + 'px', height: CANVAS_H + 'px', display: 'block', borderRadius: '14px' });
+    cvs.width = CANVAS_W() * 2;
+    cvs.height = CANVAS_H() * 2;
+    Object.assign(cvs.style, { width: CANVAS_W() + 'px', height: CANVAS_H() + 'px', display: 'block', borderRadius: '14px' });
     this.ctx2d = cvs.getContext('2d')!;
     this.canvasEl = cvs;
     panel.appendChild(cvs);
@@ -389,7 +389,7 @@ export class CardanoDicePuzzle extends Puzzle {
     // Options grid (2x2)
     const optionsGrid = document.createElement('div');
     Object.assign(optionsGrid.style, {
-      display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', width: '320px',
+      display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', width: 'min(320px, calc(100vw - 64px))',
     });
     for (let i = 0; i < 4; i++) {
       const btn = document.createElement('button');
@@ -502,25 +502,25 @@ export class CardanoDicePuzzle extends Puzzle {
   private drawCanvas(): void {
     const c = this.ctx2d!;
     const s = 2; // retina
-    c.clearRect(0, 0, CANVAS_W * s, CANVAS_H * s);
+    c.clearRect(0, 0, CANVAS_W() * s, CANVAS_H() * s);
     c.save();
     c.scale(s, s);
 
     // Question tablet (marble background, top area)
     const tabletH = 110;
-    drawMarbleBackground(c, 0, 0, CANVAS_W, tabletH, 14);
+    drawMarbleBackground(c, 0, 0, CANVAS_W(), tabletH, 14);
 
     // Corner fleur-de-lis ornaments
     const inset = 16;
     drawFleurDeLis(c, inset, inset);
-    drawFleurDeLis(c, CANVAS_W - inset, inset);
+    drawFleurDeLis(c, CANVAS_W() - inset, inset);
     drawFleurDeLis(c, inset, tabletH - inset);
-    drawFleurDeLis(c, CANVAS_W - inset, tabletH - inset);
+    drawFleurDeLis(c, CANVAS_W() - inset, tabletH - inset);
 
     // Golden glow on solve
     if (this.isSolved && this.goldenGlow > 0) {
       c.beginPath();
-      c.roundRect(0, 0, CANVAS_W, tabletH, 14);
+      c.roundRect(0, 0, CANVAS_W(), tabletH, 14);
       c.fillStyle = `rgba(212,175,55,${this.goldenGlow * 0.12})`;
       c.fill();
     }
@@ -530,18 +530,18 @@ export class CardanoDicePuzzle extends Puzzle {
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     c.fillStyle = C_FLO_GOLD;
-    c.fillText('WHAT IS THE PROBABILITY?', CANVAS_W / 2, 24);
+    c.fillText('WHAT IS THE PROBABILITY?', CANVAS_W() / 2, 24);
 
     // Question text (wrapped)
     c.font = '700 15px Rajdhani, system-ui';
     c.fillStyle = C_INK_BROWN;
-    this.drawWrappedText(c, this.scenario.question, CANVAS_W / 2, 55, CANVAS_W - 40, 20);
+    this.drawWrappedText(c, this.scenario.question, CANVAS_W() / 2, 55, CANVAS_W() - 40, 20);
 
     // Dice area (below tablet)
     const diceY = tabletH + 20;
     const count = this.diceValues.length;
     const totalWidth = count * DIE_SIZE + (count - 1) * DIE_SPACING;
-    const startX = (CANVAS_W - totalWidth) / 2;
+    const startX = (CANVAS_W() - totalWidth) / 2;
 
     for (let i = 0; i < count; i++) {
       const dx = startX + i * (DIE_SIZE + DIE_SPACING);

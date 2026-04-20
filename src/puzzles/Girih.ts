@@ -30,8 +30,8 @@ import { Puzzle } from './PuzzleBase.ts';
 /* ── Config ─────────────────────────────────────────────────────── */
 
 const GRID_N = 8;
-const CELL_PX = 56;
-const BOARD_PX = GRID_N * CELL_PX;
+function CELL_PX(): number { return Math.min(56, Math.floor((Math.min(window.innerWidth, 600) - 48) / GRID_N)); }
+function BOARD_PX(): number { return GRID_N * CELL_PX(); }
 
 /* ── Colors (Islamic Golden Age palette, matches iOS) ────────────── */
 
@@ -320,16 +320,16 @@ export class GirihPuzzle extends Puzzle {
     // Board wrapper
     const boardWrap = document.createElement('div');
     Object.assign(boardWrap.style, {
-      position: 'relative', width: BOARD_PX + 'px', height: BOARD_PX + 'px',
+      position: 'relative', width: BOARD_PX() + 'px', height: BOARD_PX() + 'px',
       borderRadius: '12px', overflow: 'hidden',
       border: `1.5px solid ${C_TEAL}20`,
     });
 
     // Canvas
     const cvs = document.createElement('canvas');
-    cvs.width = BOARD_PX * 2;
-    cvs.height = BOARD_PX * 2;
-    Object.assign(cvs.style, { width: BOARD_PX + 'px', height: BOARD_PX + 'px', display: 'block', cursor: 'pointer' });
+    cvs.width = BOARD_PX() * 2;
+    cvs.height = BOARD_PX() * 2;
+    Object.assign(cvs.style, { width: BOARD_PX() + 'px', height: BOARD_PX() + 'px', display: 'block', cursor: 'pointer' });
     this.ctx2d = cvs.getContext('2d')!;
     this.canvas = cvs;
     boardWrap.appendChild(cvs);
@@ -355,7 +355,7 @@ export class GirihPuzzle extends Puzzle {
     this.trayEl = document.createElement('div');
     Object.assign(this.trayEl.style, {
       display: 'flex', gap: '8px', overflowX: 'auto', overflowY: 'hidden',
-      width: (BOARD_PX + 20) + 'px', padding: '4px 0', height: '80px',
+      width: (BOARD_PX() + 20) + 'px', padding: '4px 0', height: '80px',
       scrollbarWidth: 'thin',
     });
     panel.appendChild(this.trayEl);
@@ -432,7 +432,7 @@ export class GirihPuzzle extends Puzzle {
   private drawAll(): void {
     const c = this.ctx2d!;
     const s = 2; // retina
-    c.clearRect(0, 0, BOARD_PX * s, BOARD_PX * s);
+    c.clearRect(0, 0, BOARD_PX() * s, BOARD_PX() * s);
     c.save();
     c.scale(s, s);
 
@@ -446,27 +446,27 @@ export class GirihPuzzle extends Puzzle {
   private drawBoard(c: CanvasRenderingContext2D): void {
     for (let r = 0; r < GRID_N; r++) {
       for (let col = 0; col < GRID_N; col++) {
-        const x = col * CELL_PX;
-        const y = r * CELL_PX;
+        const x = col * CELL_PX();
+        const y = r * CELL_PX();
         const isTarget = this.targetMask[r]?.[col] ?? false;
         const pieceID = this.grid[r]?.[col] ?? -1;
 
         if (isTarget && pieceID < 0) {
           // Empty target cell
           c.fillStyle = C_MID_BLUE;
-          c.fillRect(x + 0.5, y + 0.5, CELL_PX - 1, CELL_PX - 1);
+          c.fillRect(x + 0.5, y + 0.5, CELL_PX() - 1, CELL_PX() - 1);
           // Subtle dot at center
           c.beginPath();
-          c.arc(x + CELL_PX / 2, y + CELL_PX / 2, 1.5, 0, Math.PI * 2);
+          c.arc(x + CELL_PX() / 2, y + CELL_PX() / 2, 1.5, 0, Math.PI * 2);
           c.fillStyle = hexAlpha(C_TEAL, 0.12);
           c.fill();
           // Cell border
           c.strokeStyle = hexAlpha(C_TEAL, 0.08);
           c.lineWidth = 0.5;
-          c.strokeRect(x + 0.5, y + 0.5, CELL_PX - 1, CELL_PX - 1);
+          c.strokeRect(x + 0.5, y + 0.5, CELL_PX() - 1, CELL_PX() - 1);
         } else if (!isTarget) {
           c.fillStyle = hexAlpha(C_DEEP_BLUE, 0.6);
-          c.fillRect(x, y, CELL_PX, CELL_PX);
+          c.fillRect(x, y, CELL_PX(), CELL_PX());
         }
       }
     }
@@ -474,7 +474,7 @@ export class GirihPuzzle extends Puzzle {
     // Outer border
     c.strokeStyle = hexAlpha(C_TEAL, 0.08);
     c.lineWidth = 0.5;
-    c.strokeRect(1, 1, BOARD_PX - 2, BOARD_PX - 2);
+    c.strokeRect(1, 1, BOARD_PX() - 2, BOARD_PX() - 2);
   }
 
   private drawPlacedPieces(c: CanvasRenderingContext2D): void {
@@ -483,8 +483,8 @@ export class GirihPuzzle extends Puzzle {
       .sort((a, b) => a.placedOrder - b.placedOrder);
 
     for (const piece of sorted) {
-      const ox = piece.position.x * CELL_PX;
-      const oy = piece.position.y * CELL_PX;
+      const ox = piece.position.x * CELL_PX();
+      const oy = piece.position.y * CELL_PX();
       this.drawPieceShape(c, rotatedCells(piece), piece.color, piece.patternType, ox, oy, 1.0, 1.0);
     }
   }
@@ -494,13 +494,13 @@ export class GirihPuzzle extends Puzzle {
     const piece = this.pieces.find(p => p.id === this.draggingID);
     if (!piece) return;
 
-    const ox = this.dragStartPos.x * CELL_PX + this.dragOffset.x;
-    const oy = this.dragStartPos.y * CELL_PX + this.dragOffset.y;
+    const ox = this.dragStartPos.x * CELL_PX() + this.dragOffset.x;
+    const oy = this.dragStartPos.y * CELL_PX() + this.dragOffset.y;
     this.drawPieceShape(c, rotatedCells(piece), piece.color, piece.patternType, ox, oy, 1.0, 0.75);
 
     // Ghost preview at snap position
-    const snapCol = Math.round(ox / CELL_PX);
-    const snapRow = Math.round(oy / CELL_PX);
+    const snapCol = Math.round(ox / CELL_PX());
+    const snapRow = Math.round(oy / CELL_PX());
     const rc = rotatedCells(piece);
     const canPlace = rc.every(cell => {
       const r = snapRow + cell.row, col2 = snapCol + cell.col;
@@ -511,9 +511,9 @@ export class GirihPuzzle extends Puzzle {
     if (canPlace) {
       c.fillStyle = hexAlpha(piece.color, 0.12);
       for (const cell of rc) {
-        const rx = (snapCol + cell.col) * CELL_PX + 2;
-        const ry = (snapRow + cell.row) * CELL_PX + 2;
-        c.fillRect(rx, ry, CELL_PX - 4, CELL_PX - 4);
+        const rx = (snapCol + cell.col) * CELL_PX() + 2;
+        const ry = (snapRow + cell.row) * CELL_PX() + 2;
+        c.fillRect(rx, ry, CELL_PX() - 4, CELL_PX() - 4);
       }
     }
   }
@@ -529,7 +529,7 @@ export class GirihPuzzle extends Puzzle {
     opacity: number = 1.0,
   ): void {
     const cellSet = new Set(cells.map(cell => `${cell.row},${cell.col}`));
-    const sz = CELL_PX * scale;
+    const sz = CELL_PX() * scale;
 
     // Fill cells with gradient
     for (const cell of cells) {
@@ -726,8 +726,8 @@ export class GirihPuzzle extends Puzzle {
       const isSelected = this.selectedID === piece.id;
       const bs = boundingSize(piece);
       const maxDim = Math.max(bs.rows, bs.cols);
-      const scale = (trayH - 16) / (maxDim * CELL_PX);
-      const cardW = Math.max(bs.cols * CELL_PX * scale + 16, 50);
+      const scale = (trayH - 16) / (maxDim * CELL_PX());
+      const cardW = Math.max(bs.cols * CELL_PX() * scale + 16, 50);
 
       const card = document.createElement('div');
       Object.assign(card.style, {
@@ -744,7 +744,7 @@ export class GirihPuzzle extends Puzzle {
       const rc = rotatedCells(piece);
       const bCols = Math.max(...rc.map(c2 => c2.col)) + 1;
       const bRows = Math.max(...rc.map(c2 => c2.row)) + 1;
-      const s2 = CELL_PX * scale;
+      const s2 = CELL_PX() * scale;
       miniCvs.width = Math.ceil(bCols * s2 * 2);
       miniCvs.height = Math.ceil(bRows * s2 * 2);
       Object.assign(miniCvs.style, {
@@ -841,8 +841,8 @@ export class GirihPuzzle extends Puzzle {
   private getCanvasPos(e: MouseEvent): { x: number; y: number } {
     const rect = this.canvas!.getBoundingClientRect();
     return {
-      x: (e.clientX - rect.left) * (BOARD_PX / rect.width),
-      y: (e.clientY - rect.top) * (BOARD_PX / rect.height),
+      x: (e.clientX - rect.left) * (BOARD_PX() / rect.width),
+      y: (e.clientY - rect.top) * (BOARD_PX() / rect.height),
     };
   }
 
@@ -861,8 +861,8 @@ export class GirihPuzzle extends Puzzle {
     if (this.selectedID !== null) {
       const idx = this.pieces.findIndex(p => p.id === this.selectedID);
       if (idx < 0) return;
-      const col = Math.floor(pos.x / CELL_PX);
-      const row = Math.floor(pos.y / CELL_PX);
+      const col = Math.floor(pos.x / CELL_PX());
+      const row = Math.floor(pos.y / CELL_PX());
       const rc = rotatedCells(this.pieces[idx]);
 
       // Center the piece around tap point
@@ -920,8 +920,8 @@ export class GirihPuzzle extends Puzzle {
     if (this.draggingID === null) return;
     const pos = this.getCanvasPos(e);
     this.dragOffset = {
-      x: pos.x - this.dragStartPos.x * CELL_PX - CELL_PX / 2,
-      y: pos.y - this.dragStartPos.y * CELL_PX - CELL_PX / 2,
+      x: pos.x - this.dragStartPos.x * CELL_PX() - CELL_PX() / 2,
+      y: pos.y - this.dragStartPos.y * CELL_PX() - CELL_PX() / 2,
     };
     this.drawAll();
   }
@@ -935,7 +935,7 @@ export class GirihPuzzle extends Puzzle {
     const totalDist = Math.hypot(this.dragOffset.x, this.dragOffset.y);
 
     // Short drag = just re-place at original position
-    if (this.dragPickedFromGrid && totalDist < CELL_PX * 0.4) {
+    if (this.dragPickedFromGrid && totalDist < CELL_PX() * 0.4) {
       const snapCol = Math.round(this.dragStartPos.x);
       const snapRow = Math.round(this.dragStartPos.y);
       const rc = rotatedCells(this.pieces[idx]);
@@ -960,10 +960,10 @@ export class GirihPuzzle extends Puzzle {
     }
 
     // Normal drag end — try to snap
-    const finalX = this.dragStartPos.x * CELL_PX + this.dragOffset.x;
-    const finalY = this.dragStartPos.y * CELL_PX + this.dragOffset.y;
-    const snapCol = Math.round(finalX / CELL_PX);
-    const snapRow = Math.round(finalY / CELL_PX);
+    const finalX = this.dragStartPos.x * CELL_PX() + this.dragOffset.x;
+    const finalY = this.dragStartPos.y * CELL_PX() + this.dragOffset.y;
+    const snapCol = Math.round(finalX / CELL_PX());
+    const snapRow = Math.round(finalY / CELL_PX());
     const rc = rotatedCells(this.pieces[idx]);
 
     const canPlace = rc.every(cell => {
@@ -995,8 +995,8 @@ export class GirihPuzzle extends Puzzle {
       .filter(p => p.isPlaced)
       .sort((a, b) => b.placedOrder - a.placedOrder);
     for (const piece of sorted) {
-      const localCol = px / CELL_PX - piece.position.x;
-      const localRow = py / CELL_PX - piece.position.y;
+      const localCol = px / CELL_PX() - piece.position.x;
+      const localRow = py / CELL_PX() - piece.position.y;
       const rc = rotatedCells(piece);
       if (rc.some(cell =>
         cell.col <= localCol && localCol < cell.col + 1 &&

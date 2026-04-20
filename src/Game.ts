@@ -31,6 +31,7 @@ import {
 } from 'postprocessing';
 import { getAudio } from './core/Audio.ts';
 import { getInput } from './core/Input.ts';
+import { IS_MOBILE } from './core/Platform.ts';
 import { SaveManager, SHIP_PART_UNLOCK_THRESHOLD, type SaveData } from './core/SaveManager.ts';
 import type { Era, EraId } from './eras/eras.ts';
 import { ERA_CONTENT } from './eras/eraContent.ts';
@@ -389,27 +390,41 @@ export class Game {
     this.hud.updateHpShield(this.hp, this.maxHp, this.shield, this.maxShield);
     this.hud.setBoostReady(1);
 
-    // Post-processing stack.
+    // Post-processing stack. On mobile GPUs we skip SMAA and chromatic
+    // aberration (expensive, barely visible on small screens) and dial
+    // bloom down so the pipeline stays within thermal budget.
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
 
-    const bloom = new BloomEffect({
-      intensity: 0.7,
-      luminanceThreshold: 0.85,
-      luminanceSmoothing: 0.15,
-      mipmapBlur: true,
-      radius: 0.4,
-    });
-    const chroma = new ChromaticAberrationEffect({
-      offset: new Vector2(0.0006, 0.0006),
-    });
-    const vignette = new VignetteEffect({ darkness: 0.42, offset: 0.35 });
-    const smaa = new SMAAEffect();
-    const tone = new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC });
-
-    this.composer.addPass(new EffectPass(this.camera, bloom));
-    this.composer.addPass(new EffectPass(this.camera, chroma));
-    this.composer.addPass(new EffectPass(this.camera, vignette, tone, smaa));
+    if (IS_MOBILE) {
+      const bloom = new BloomEffect({
+        intensity: 0.5,
+        luminanceThreshold: 0.9,
+        mipmapBlur: true,
+        radius: 0.3,
+      });
+      const vignette = new VignetteEffect({ darkness: 0.35, offset: 0.3 });
+      const tone = new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC });
+      this.composer.addPass(new EffectPass(this.camera, bloom));
+      this.composer.addPass(new EffectPass(this.camera, vignette, tone));
+    } else {
+      const bloom = new BloomEffect({
+        intensity: 0.7,
+        luminanceThreshold: 0.85,
+        luminanceSmoothing: 0.15,
+        mipmapBlur: true,
+        radius: 0.4,
+      });
+      const chroma = new ChromaticAberrationEffect({
+        offset: new Vector2(0.0006, 0.0006),
+      });
+      const vignette = new VignetteEffect({ darkness: 0.42, offset: 0.35 });
+      const smaa = new SMAAEffect();
+      const tone = new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC });
+      this.composer.addPass(new EffectPass(this.camera, bloom));
+      this.composer.addPass(new EffectPass(this.camera, chroma));
+      this.composer.addPass(new EffectPass(this.camera, vignette, tone, smaa));
+    }
 
     this._smoothCamPos.copy(this.ship.group.position).add(CAMERA_OFFSET);
     this.camera.position.copy(this._smoothCamPos);
@@ -465,7 +480,7 @@ export class Game {
     this.ship.init();
     this.sparks = new ImpactSparks(this.scene);
     this.celestial.init();
-    this.flowManager.init(this.scene);
+    await this.flowManager.init(this.scene);
 
     // Free-space spawn: park the player OUTSIDE Egypt's corridor at a
     // radial distance that takes ≥5 seconds to cross even on the fastest

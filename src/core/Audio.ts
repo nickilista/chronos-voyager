@@ -122,10 +122,9 @@ export class AudioManager {
     this.sfxBus.gain.value = SFX_VOLUME;
     this.sfxBus.connect(this.ctx.destination);
 
-    // Preload every track in parallel. Using <audio> elements (vs
-    // decodeAudioData buffers) keeps memory low for the 60MB combined
-    // download — streams play as they arrive.
-    for (const id of Object.keys(MUSIC_URLS) as MusicId[]) {
+    // Only preload essential tracks — others load on demand when the
+    // player approaches or enters the corresponding era corridor.
+    for (const id of ['space', 'egypt'] as MusicId[]) {
       this.loadTrack(id);
     }
 
@@ -183,6 +182,10 @@ export class AudioManager {
    */
   setActiveEra(eraId: EraId): void {
     if (!this.ctx || this.activeEra === eraId) return;
+    // Lazy-load the track if it hasn't been preloaded yet.
+    if (!this.tracks[eraId]) {
+      this.loadTrack(eraId);
+    }
     const now = this.ctx.currentTime;
 
     // Fade out the outgoing era.
@@ -258,6 +261,17 @@ export class AudioManager {
       this.ctx.currentTime,
       0.08,
     );
+  }
+
+  /**
+   * Proactively start loading an era's audio track before the player
+   * enters that corridor. Call from FlowManager when the ship is
+   * approaching a new era so the stream has time to buffer.
+   */
+  preloadEraTrack(eraId: EraId): void {
+    if (!this.tracks[eraId]) {
+      this.loadTrack(eraId);
+    }
   }
 
   private rampTo(gain: GainNode, target: number, now: number): void {

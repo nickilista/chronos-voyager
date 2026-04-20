@@ -255,7 +255,7 @@ export class SorobanPuzzle extends Puzzle {
       background: 'rgba(14,8,24,0.92)', backdropFilter: 'blur(12px)',
       border: `1px solid ${C_GOLD_LEAF}40`, borderTop: `3px solid ${C_GOLD_LEAF}`,
       borderRadius: '10px', boxShadow: '0 18px 60px rgba(0,0,0,0.65)', color: C_PARCHMENT,
-      maxHeight: '96vh', overflowY: 'auto', minWidth: '380px',
+      maxHeight: '96vh', overflowY: 'auto', minWidth: 'min(380px, 95vw)',
     });
     root.appendChild(panel);
 
@@ -352,7 +352,7 @@ export class SorobanPuzzle extends Puzzle {
       border: `1.5px solid ${C_GOLD_LEAF}4d`,
     });
 
-    this.sW = Math.max(320, this.colCount * 68 + 40);
+    this.sW = Math.min(Math.max(320, this.colCount * 68 + 40), window.innerWidth - 64);
     this.sH = 240;
 
     const cvs = document.createElement('canvas');

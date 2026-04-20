@@ -240,8 +240,8 @@ function getMapForLevel(level: number): FCMap {
 
 /* ── Canvas drawing dimensions ───────────────────────────────── */
 
-const MAP_W = 360;
-const MAP_H = 300;
+function MAP_W(): number { return Math.min(360, window.innerWidth - 48); }
+function MAP_H(): number { return Math.round(MAP_W() * 300 / 360); }
 
 /* ── Puzzle class ────────────────────────────────────────────── */
 
@@ -393,9 +393,9 @@ export class FourColorPuzzle extends Puzzle {
       border: `1px solid ${C_MAROON}55`,
     });
     const cvs = document.createElement('canvas');
-    cvs.width = MAP_W * 2;
-    cvs.height = MAP_H * 2;
-    Object.assign(cvs.style, { width: MAP_W + 'px', height: MAP_H + 'px', display: 'block', cursor: 'pointer' });
+    cvs.width = MAP_W() * 2;
+    cvs.height = MAP_H() * 2;
+    Object.assign(cvs.style, { width: MAP_W() + 'px', height: MAP_H() + 'px', display: 'block', cursor: 'pointer' });
     this.canvasEl = cvs;
     this.ctx2d = cvs.getContext('2d')!;
     cvs.addEventListener('pointerdown', (ev) => this.handleMapClick(ev));
@@ -519,14 +519,14 @@ export class FourColorPuzzle extends Puzzle {
   private drawMap(): void {
     const c = this.ctx2d!;
     const s = 2;
-    c.clearRect(0, 0, MAP_W * s, MAP_H * s);
+    c.clearRect(0, 0, MAP_W() * s, MAP_H() * s);
     c.save();
     c.scale(s, s);
 
     // Victorian map background (aged paper)
     c.fillStyle = '#FDF6ED';
     c.beginPath();
-    c.roundRect(0, 0, MAP_W, MAP_H, 10);
+    c.roundRect(0, 0, MAP_W(), MAP_H(), 10);
     c.fill();
 
     // Paper texture (cross-hatch)
@@ -546,16 +546,16 @@ export class FourColorPuzzle extends Puzzle {
   private drawPaperTexture(c: CanvasRenderingContext2D): void {
     c.strokeStyle = 'rgba(212,197,160,0.12)';
     c.lineWidth = 0.3;
-    for (let x = 0; x <= MAP_W; x += 12) {
+    for (let x = 0; x <= MAP_W(); x += 12) {
       c.beginPath();
       c.moveTo(x, 0);
-      c.lineTo(x, MAP_H);
+      c.lineTo(x, MAP_H());
       c.stroke();
     }
-    for (let y = 0; y <= MAP_H; y += 12) {
+    for (let y = 0; y <= MAP_H(); y += 12) {
       c.beginPath();
       c.moveTo(0, y);
-      c.lineTo(MAP_W, y);
+      c.lineTo(MAP_W(), y);
       c.stroke();
     }
   }
@@ -579,8 +579,8 @@ export class FourColorPuzzle extends Puzzle {
     c.stroke(path);
 
     // Label
-    const cx = region.center[0] * MAP_W;
-    const cy = region.center[1] * MAP_H;
+    const cx = region.center[0] * MAP_W();
+    const cy = region.center[1] * MAP_H();
     c.fillStyle = '#3A2920';
     c.font = `600 ${region.labelSize}px "Rajdhani", serif`;
     c.textAlign = 'center';
@@ -589,7 +589,7 @@ export class FourColorPuzzle extends Puzzle {
   }
 
   private drawCompass(c: CanvasRenderingContext2D): void {
-    const cx = MAP_W - 24;
+    const cx = MAP_W() - 24;
     const cy = 24;
     const r = 10;
     // N arrow
@@ -611,9 +611,9 @@ export class FourColorPuzzle extends Puzzle {
   private buildRegionPath2D(region: FCRegion): Path2D {
     const path = new Path2D();
     if (region.vertices.length === 0) return path;
-    path.moveTo(region.vertices[0][0] * MAP_W, region.vertices[0][1] * MAP_H);
+    path.moveTo(region.vertices[0][0] * MAP_W(), region.vertices[0][1] * MAP_H());
     for (let i = 1; i < region.vertices.length; i++) {
-      path.lineTo(region.vertices[i][0] * MAP_W, region.vertices[i][1] * MAP_H);
+      path.lineTo(region.vertices[i][0] * MAP_W(), region.vertices[i][1] * MAP_H());
     }
     path.closePath();
     return path;
@@ -631,8 +631,8 @@ export class FourColorPuzzle extends Puzzle {
   private handleMapClick(ev: PointerEvent): void {
     if (this.phase !== 'playing') return;
     const rect = this.canvasEl!.getBoundingClientRect();
-    const x = (ev.clientX - rect.left) / rect.width * MAP_W;
-    const y = (ev.clientY - rect.top) / rect.height * MAP_H;
+    const x = (ev.clientX - rect.left) / rect.width * MAP_W();
+    const y = (ev.clientY - rect.top) / rect.height * MAP_H();
 
     // Find which region was clicked (point-in-polygon)
     for (const region of this.mapData.regions) {
@@ -649,8 +649,8 @@ export class FourColorPuzzle extends Puzzle {
     const n = verts.length;
     let inside = false;
     for (let i = 0, j = n - 1; i < n; j = i++) {
-      const xi = verts[i][0] * MAP_W, yi = verts[i][1] * MAP_H;
-      const xj = verts[j][0] * MAP_W, yj = verts[j][1] * MAP_H;
+      const xi = verts[i][0] * MAP_W(), yi = verts[i][1] * MAP_H();
+      const xj = verts[j][0] * MAP_W(), yj = verts[j][1] * MAP_H();
       if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
         inside = !inside;
       }

@@ -724,17 +724,91 @@ const CSS = `
   color: rgba(159, 230, 255, 0.6);
 }
 
+/* ═══ Tablet / small laptop ═══ */
 @media (max-width: 900px) {
   .sb-root {
-    grid-template-columns: 1fr;
-    grid-template-rows: 60px auto 1fr auto;
-    grid-template-areas: "header" "slots" "stats" "bottom";
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 50px 1fr auto;
+    grid-template-areas:
+      "header header"
+      "slots  stats"
+      "bottom bottom";
     gap: 8px;
     padding: 10px;
   }
-  .sb-slots, .sb-stats { max-height: 36vh; }
-  .sb-title { font-size: 22px; }
+  .sb-slots, .sb-stats { max-height: 50vh; }
+  .sb-title { font-size: 22px; letter-spacing: 0.18em; }
   .sb-launch { padding: 8px 18px; }
   .sb-launch-main { font-size: 16px; }
+}
+
+/* ═══ Phone portrait ═══ */
+@media (max-width: 600px) {
+  .sb-root {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 30vh auto auto auto;
+    grid-template-areas:
+      "header"
+      "scene"
+      "bottom"
+      "slots"
+      "stats";
+    gap: 6px;
+    padding: 8px;
+    padding-top: max(8px, env(safe-area-inset-top, 0px));
+    padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sb-header {
+    padding-left: 2px;
+  }
+  .sb-title {
+    font-size: clamp(16px, 5vw, 22px);
+    letter-spacing: 0.14em;
+  }
+  .sb-subtitle { font-size: 10px; letter-spacing: 0.18em; }
+  /* Transparent scene spacer so the 3D ship preview behind shows through */
+  .sb-root::before {
+    content: '';
+    grid-area: scene;
+    pointer-events: none;
+  }
+  .sb-panel {
+    max-height: none;
+    padding: 12px 12px 14px;
+  }
+  .sb-slots, .sb-stats {
+    max-height: none;
+  }
+  .sb-slot { margin-bottom: 6px; }
+  .sb-slot-select { padding: 8px 10px; font-size: 14px; min-height: 44px; }
+  /* Launch button first (above module pickers) — most important CTA */
+  .sb-bottom {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .sb-launch {
+    order: -1;
+    padding: 14px 20px;
+    width: 100%;
+    border-radius: 8px;
+  }
+  .sb-launch-main { font-size: 18px; }
+  .sb-launch-hint { display: none; }
+  .sb-presets {
+    padding: 8px 10px 10px;
+    gap: 6px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    /* Horizontal scroll hint: fade right edge */
+    -webkit-mask-image: linear-gradient(to right, black 85%, transparent);
+    mask-image: linear-gradient(to right, black 85%, transparent);
+  }
+  .sb-preset { min-width: 80px; padding: 8px 10px; min-height: 44px; }
+  .sb-presets-label { font-size: 9px; padding-right: 6px; margin-right: 2px; }
+  .sb-stat-grid { row-gap: 4px; column-gap: 10px; }
+  .sb-stat-label { font-size: 10px; }
+  .sb-stat-val { font-size: 12px; }
 }
 `;

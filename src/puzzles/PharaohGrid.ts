@@ -147,7 +147,7 @@ export class PharaohGridPuzzle extends Puzzle {
     const panel = document.createElement('div');
     Object.assign(panel.style, {
       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px',
-      pointerEvents: 'auto', padding: '20px 24px',
+      pointerEvents: 'auto', padding: 'clamp(12px,2vw,20px) clamp(14px,3vw,24px)',
       background: 'rgba(26,15,5,0.93)', backdropFilter: 'blur(12px)',
       border: `1px solid rgba(201,168,76,0.25)`, borderTop: `3px solid ${C_ACCENT}`,
       borderRadius: '10px', boxShadow: '0 18px 60px rgba(0,0,0,0.7)', color: C_CREAM,
@@ -190,7 +190,7 @@ export class PharaohGridPuzzle extends Puzzle {
     this.poolEl = document.createElement('div');
     Object.assign(this.poolEl.style, {
       display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '6px',
-      padding: '4px 16px', maxWidth: '360px',
+      padding: '4px 16px', maxWidth: 'min(360px, calc(100vw - 48px))',
     });
     panel.appendChild(this.poolEl);
 

@@ -30,9 +30,11 @@ const ROWS = 6;
 const COLS = 6;
 const GOAL = ROWS * COLS; // 36
 const MAX_TURNS = 8;
-const CELL_PX = 72;
-const BOARD_W = COLS * CELL_PX;
-const BOARD_H = ROWS * CELL_PX;
+function cellPx(): number {
+  return Math.min(72, Math.floor((Math.min(window.innerWidth, 600) - 48) / COLS));
+}
+function boardW(): number { return COLS * cellPx(); }
+function boardH(): number { return ROWS * cellPx(); }
 const QUESTION_TIME = 10; // seconds
 
 /* ── Colors (Indian temple theme, matches iOS) ────────────────── */
@@ -115,7 +117,7 @@ function cellToRowCol(cell: number): { row: number; col: number } {
 
 function cellCenter(cell: number): { x: number; y: number } {
   const { row, col } = cellToRowCol(cell);
-  return { x: col * CELL_PX + CELL_PX * 0.5, y: row * CELL_PX + CELL_PX * 0.5 };
+  return { x: col * cellPx() + cellPx() * 0.5, y: row * cellPx() + cellPx() * 0.5 };
 }
 
 /* ── Puzzle class ─────────────────────────────────────────────── */
@@ -238,30 +240,30 @@ export class MokshaPatamPuzzle extends Puzzle {
     // Board wrapper (canvas + pawn overlay)
     const boardWrap = document.createElement('div');
     Object.assign(boardWrap.style, {
-      position: 'relative', width: BOARD_W + 'px', height: BOARD_H + 'px',
+      position: 'relative', width: boardW() + 'px', height: boardH() + 'px',
       borderRadius: '8px', overflow: 'hidden',
       border: '2px solid rgba(212,175,55,0.25)',
     });
 
     // Canvas for board + snakes + ladders
     const cvs = document.createElement('canvas');
-    cvs.width = BOARD_W * 2; // 2x for retina
-    cvs.height = BOARD_H * 2;
-    Object.assign(cvs.style, { width: BOARD_W + 'px', height: BOARD_H + 'px', display: 'block' });
+    cvs.width = boardW() * 2; // 2x for retina
+    cvs.height = boardH() * 2;
+    Object.assign(cvs.style, { width: boardW() + 'px', height: boardH() + 'px', display: 'block' });
     this.ctx2d = cvs.getContext('2d')!;
     boardWrap.appendChild(cvs);
 
     // Pawn
     const pawn = document.createElement('div');
     Object.assign(pawn.style, {
-      position: 'absolute', width: (CELL_PX * 0.48) + 'px', height: (CELL_PX * 0.48) + 'px',
+      position: 'absolute', width: (cellPx() * 0.48) + 'px', height: (cellPx() * 0.48) + 'px',
       background: `radial-gradient(circle at 40% 35%, #fff2c8, ${C_PLAYER} 70%, #6a3c0f 100%)`,
       border: '2px solid #f7d58f', borderRadius: '50%',
       boxShadow: `0 0 14px rgba(230,126,34,0.65)`,
       transition: 'left 0.45s cubic-bezier(.34,1.56,.64,1), top 0.45s cubic-bezier(.34,1.56,.64,1)',
       pointerEvents: 'none', zIndex: '8',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: (CELL_PX * 0.28) + 'px',
+      fontSize: (cellPx() * 0.28) + 'px',
     });
     pawn.textContent = '🧘';
     boardWrap.appendChild(pawn);
@@ -327,15 +329,15 @@ export class MokshaPatamPuzzle extends Puzzle {
   private drawBoard(): void {
     const c = this.ctx2d!;
     const s = 2; // retina scale
-    c.clearRect(0, 0, BOARD_W * s, BOARD_H * s);
+    c.clearRect(0, 0, boardW() * s, boardH() * s);
     c.save();
     c.scale(s, s);
 
     // Draw cells
     for (let cell = 1; cell <= GOAL; cell++) {
       const { row, col } = cellToRowCol(cell);
-      const x = col * CELL_PX;
-      const y = row * CELL_PX;
+      const x = col * cellPx();
+      const y = row * cellPx();
       const type = cellType(cell);
       const isAlt = (row + col) % 2 === 0;
 
@@ -352,12 +354,12 @@ export class MokshaPatamPuzzle extends Puzzle {
         default: fill = isAlt ? C_CELL_ALT : C_CELL_BASE;
       }
       c.fillStyle = fill;
-      c.fillRect(x, y, CELL_PX, CELL_PX);
+      c.fillRect(x, y, cellPx(), cellPx());
 
       // Cell border
       c.strokeStyle = 'rgba(255,195,90,0.1)';
       c.lineWidth = 0.5;
-      c.strokeRect(x, y, CELL_PX, CELL_PX);
+      c.strokeRect(x, y, cellPx(), cellPx());
 
       // Cell number
       c.fillStyle = 'rgba(245,230,204,0.3)';
@@ -374,10 +376,10 @@ export class MokshaPatamPuzzle extends Puzzle {
         : type === 'question' ? '❓'
         : null;
       if (icon) {
-        c.font = `${CELL_PX * 0.32}px serif`;
+        c.font = `${cellPx() * 0.32}px serif`;
         c.textAlign = 'center';
         c.textBaseline = 'middle';
-        c.fillText(icon, x + CELL_PX / 2, y + CELL_PX / 2 + 2);
+        c.fillText(icon, x + cellPx() / 2, y + cellPx() / 2 + 2);
       }
     }
 
@@ -402,7 +404,7 @@ export class MokshaPatamPuzzle extends Puzzle {
     const len = Math.sqrt(dx * dx + dy * dy);
     if (len === 0) return;
 
-    const offset = CELL_PX * 0.12;
+    const offset = cellPx() * 0.12;
     const nx = -dy / len * offset;
     const ny = dx / len * offset;
     const color = hasQuestion ? C_QUESTION_PURP : C_LADDER_GOLD;
@@ -423,7 +425,7 @@ export class MokshaPatamPuzzle extends Puzzle {
     c.stroke();
 
     // Rungs
-    const rungCount = Math.max(3, Math.floor(len / (CELL_PX * 0.4)));
+    const rungCount = Math.max(3, Math.floor(len / (cellPx() * 0.4)));
     c.strokeStyle = color + '77';
     c.lineWidth = 1.8;
     for (let i = 1; i < rungCount; i++) {
@@ -440,7 +442,7 @@ export class MokshaPatamPuzzle extends Puzzle {
     if (hasQuestion) {
       const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
       c.fillStyle = C_QUESTION_PURP;
-      c.font = 'bold ' + (CELL_PX * 0.28) + 'px Rajdhani, system-ui';
+      c.font = 'bold ' + (cellPx() * 0.28) + 'px Rajdhani, system-ui';
       c.textAlign = 'center';
       c.textBaseline = 'middle';
       c.fillText('?', mid.x, mid.y);
@@ -453,18 +455,18 @@ export class MokshaPatamPuzzle extends Puzzle {
     const midX = (p1.x + p2.x) / 2;
     const midY = (p1.y + p2.y) / 2;
     const dx = p2.x - p1.x;
-    const perpOffset = CELL_PX * 0.5 * (dx > 0 ? 1 : -1);
+    const perpOffset = cellPx() * 0.5 * (dx > 0 ? 1 : -1);
 
     // Snake body (bezier curve)
     c.beginPath();
     c.moveTo(p1.x, p1.y);
     c.bezierCurveTo(
-      midX + perpOffset, midY - CELL_PX * 0.3,
-      midX - perpOffset, midY + CELL_PX * 0.3,
+      midX + perpOffset, midY - cellPx() * 0.3,
+      midX - perpOffset, midY + cellPx() * 0.3,
       p2.x, p2.y,
     );
     c.strokeStyle = C_SNAKE_RED + 'bb';
-    c.lineWidth = CELL_PX * 0.08;
+    c.lineWidth = cellPx() * 0.08;
     c.lineCap = 'round';
     c.stroke();
 
@@ -472,25 +474,25 @@ export class MokshaPatamPuzzle extends Puzzle {
     c.beginPath();
     c.moveTo(p1.x, p1.y);
     c.bezierCurveTo(
-      midX + perpOffset, midY - CELL_PX * 0.3,
-      midX - perpOffset, midY + CELL_PX * 0.3,
+      midX + perpOffset, midY - cellPx() * 0.3,
+      midX - perpOffset, midY + cellPx() * 0.3,
       p2.x, p2.y,
     );
     c.strokeStyle = C_SNAKE_GREEN + '77';
-    c.lineWidth = CELL_PX * 0.03;
-    c.setLineDash([CELL_PX * 0.1, CELL_PX * 0.06]);
+    c.lineWidth = cellPx() * 0.03;
+    c.setLineDash([cellPx() * 0.1, cellPx() * 0.06]);
     c.stroke();
     c.setLineDash([]);
 
     // Head dot
     c.beginPath();
-    c.arc(p1.x, p1.y, CELL_PX * 0.07, 0, Math.PI * 2);
+    c.arc(p1.x, p1.y, cellPx() * 0.07, 0, Math.PI * 2);
     c.fillStyle = C_SNAKE_RED;
     c.fill();
 
     // Tail dot (smaller)
     c.beginPath();
-    c.arc(p2.x, p2.y, CELL_PX * 0.04, 0, Math.PI * 2);
+    c.arc(p2.x, p2.y, cellPx() * 0.04, 0, Math.PI * 2);
     c.fillStyle = C_SNAKE_RED + '88';
     c.fill();
   }
@@ -500,7 +502,7 @@ export class MokshaPatamPuzzle extends Puzzle {
   private placePawn(animate = true): void {
     if (!this.pawnEl) return;
     const { x, y } = cellCenter(this.playerCell);
-    const size = CELL_PX * 0.48;
+    const size = cellPx() * 0.48;
     const px = x - size / 2;
     const py = y - size / 2;
     if (!animate) this.pawnEl.style.transition = 'none';

@@ -371,6 +371,7 @@ export class Hud {
         left: 22px;
         bottom: 28px;
         min-width: 260px;
+        max-width: 90vw;
         padding: 12px 16px 14px;
         background: rgba(6, 10, 22, 0.65);
         border: 1px solid rgba(95, 180, 255, 0.22);
@@ -648,6 +649,67 @@ export class Hud {
         color: #e6faff;
         background: rgba(20, 40, 72, 0.85);
         border-color: rgba(95, 200, 255, 0.7);
+      }
+
+      /* ============ Hide controls legend on touch devices ============ */
+      @media (pointer: coarse) {
+        .hud-controls { display: none !important; }
+        .hud-exit-btn,
+        .hud-session-btn,
+        .hud-sound-btn {
+          min-height: 44px;
+          min-width: 44px;
+        }
+      }
+
+      /* ============ Mobile overrides for injected HUD panels ============ */
+      @media (max-width: 600px) {
+        .hud-loadout {
+          left: max(8px, env(safe-area-inset-left, 0px));
+          bottom: max(8px, env(safe-area-inset-bottom, 0px));
+          min-width: auto;
+          width: clamp(180px, 55vw, 260px);
+          padding: 10px 12px 12px;
+        }
+        .hud-lo-row {
+          grid-template-columns: 28px 1fr 38px;
+          gap: 6px;
+          margin-bottom: 4px;
+        }
+        .hud-lo-label {
+          font-size: 9px;
+        }
+        .hud-lo-value {
+          font-size: 12px;
+        }
+        .hud-lo-weapon {
+          font-size: 9px;
+          padding: 3px 4px;
+        }
+        .hud-lo-weapons {
+          margin-top: 6px;
+        }
+        .hud-controls {
+          display: none !important;
+        }
+        .hud-session-menu {
+          top: 64px;
+          left: max(8px, env(safe-area-inset-left, 0px));
+        }
+        .hud-session-btn {
+          padding: 6px 10px;
+          font-size: 10px;
+        }
+        .hud-sound-btn {
+          top: 54px;
+          right: max(8px, env(safe-area-inset-right, 0px));
+        }
+        .hud-exit-btn {
+          top: 12px;
+          right: max(8px, env(safe-area-inset-right, 0px));
+          padding: 8px 14px;
+          font-size: 12px;
+        }
       }
     `;
     document.head.appendChild(s);

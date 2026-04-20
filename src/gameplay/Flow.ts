@@ -1,6 +1,7 @@
 import { Group, Matrix4, Quaternion, Vector3 } from 'three';
 import { ERA_CONTENT } from '../eras/eraContent.ts';
 import type { Era } from '../eras/eras.ts';
+import { loadEraModels } from './Assets.ts';
 import { CorridorAura } from '../render/CorridorAura.ts';
 import { FloorGlyphs } from '../render/FloorGlyphs.ts';
 import { Collectibles } from './Collectibles.ts';
@@ -89,7 +90,12 @@ export class Flow {
     this.track.setFactories(factories, shapes);
   }
 
-  init(): void {
+  /** Whether init() has completed. Used by FlowManager to gate updates. */
+  initialized = false;
+
+  async init(): Promise<void> {
+    // Ensure all GLB models for this era are loaded before building meshes.
+    await loadEraModels(this.era.id);
     this.track.init();
     this.collectibles.init();
     this.corridorAura.init();
@@ -100,6 +106,7 @@ export class Flow {
       this.corridorAura.group,
       this.floorGlyphs.group,
     );
+    this.initialized = true;
   }
 
   /** Convert a world-space point into flow-local coordinates. */

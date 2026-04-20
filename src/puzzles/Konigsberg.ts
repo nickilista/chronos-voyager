@@ -249,8 +249,8 @@ function level7(): KBGraph {
 
 /* ── Canvas size ──────────────────────────────────────────────── */
 
-const CANVAS_W = 360;
-const CANVAS_H = 300;
+function CANVAS_W(): number { return Math.min(360, window.innerWidth - 48); }
+function CANVAS_H(): number { return Math.round(CANVAS_W() * 300 / 360); }
 const NODE_RADIUS = 22;
 
 /* ── Puzzle class ─────────────────────────────────────────────── */
@@ -406,16 +406,16 @@ export class KonigsbergPuzzle extends Puzzle {
     // Graph canvas wrapper
     const canvasWrap = document.createElement('div');
     Object.assign(canvasWrap.style, {
-      position: 'relative', width: CANVAS_W + 'px', height: CANVAS_H + 'px',
+      position: 'relative', width: CANVAS_W() + 'px', height: CANVAS_H() + 'px',
       borderRadius: '12px', overflow: 'hidden',
       border: `1px solid ${C_GOLD}33`,
       boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
     });
 
     const cvs = document.createElement('canvas');
-    cvs.width = CANVAS_W * 2;
-    cvs.height = CANVAS_H * 2;
-    Object.assign(cvs.style, { width: CANVAS_W + 'px', height: CANVAS_H + 'px', display: 'block' });
+    cvs.width = CANVAS_W() * 2;
+    cvs.height = CANVAS_H() * 2;
+    Object.assign(cvs.style, { width: CANVAS_W() + 'px', height: CANVAS_H() + 'px', display: 'block' });
     this.ctx2d = cvs.getContext('2d')!;
     this.canvasEl = cvs;
     canvasWrap.appendChild(cvs);
@@ -440,7 +440,7 @@ export class KonigsbergPuzzle extends Puzzle {
       display: 'none', padding: '8px 12px', borderRadius: '8px',
       background: `${C_GOLD}14`, border: `1px solid ${C_GOLD}33`,
       fontSize: '12px', color: `${C_CREAM}dd`, textAlign: 'center',
-      maxWidth: CANVAS_W + 'px',
+      maxWidth: CANVAS_W() + 'px',
     });
     panel.appendChild(this.hintEl);
 
@@ -486,25 +486,25 @@ export class KonigsbergPuzzle extends Puzzle {
   private drawCanvas(): void {
     const c = this.ctx2d!;
     const s = 2;
-    c.clearRect(0, 0, CANVAS_W * s, CANVAS_H * s);
+    c.clearRect(0, 0, CANVAS_W() * s, CANVAS_H() * s);
     c.save();
     c.scale(s, s);
 
     // Water background gradient
-    const grad = c.createLinearGradient(0, 0, 0, CANVAS_H);
+    const grad = c.createLinearGradient(0, 0, 0, CANVAS_H());
     grad.addColorStop(0, hexToRGBA(C_WATER, 0.25));
     grad.addColorStop(1, hexToRGBA(C_WATER_LT, 0.15));
     c.fillStyle = grad;
-    roundRect(c, 0, 0, CANVAS_W, CANVAS_H, 12);
+    roundRect(c, 0, 0, CANVAS_W(), CANVAS_H(), 12);
     c.fill();
 
     // Water ripples
     c.strokeStyle = hexToRGBA(C_WATER, 0.15);
     c.lineWidth = 0.8;
-    for (let i = 0; i < CANVAS_W; i += 40) {
+    for (let i = 0; i < CANVAS_W(); i += 40) {
       c.beginPath();
-      c.moveTo(i, CANVAS_H * 0.3);
-      c.quadraticCurveTo(i + 10, CANVAS_H * 0.3 - 3, i + 20, CANVAS_H * 0.3);
+      c.moveTo(i, CANVAS_H() * 0.3);
+      c.quadraticCurveTo(i + 10, CANVAS_H() * 0.3 - 3, i + 20, CANVAS_H() * 0.3);
       c.stroke();
     }
 
@@ -631,7 +631,7 @@ export class KonigsbergPuzzle extends Puzzle {
   private nodePos(id: number): { x: number; y: number } {
     const node = this.graph.nodes.find(n => n.id === id);
     if (!node) return { x: 0, y: 0 };
-    return { x: node.x * CANVAS_W, y: node.y * CANVAS_H };
+    return { x: node.x * CANVAS_W(), y: node.y * CANVAS_H() };
   }
 
   /* ═══════════════════ Node buttons ═════════════════════════════ */

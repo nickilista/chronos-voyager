@@ -593,7 +593,7 @@ export class PlayfairPuzzle extends Puzzle {
 
     const gridEl = document.createElement('div');
     Object.assign(gridEl.style, {
-      display: 'grid', gridTemplateColumns: 'repeat(5, 38px)', gridTemplateRows: 'repeat(5, 38px)',
+      display: 'grid', gridTemplateColumns: `repeat(5, ${Math.min(38, Math.floor((Math.min(window.innerWidth, 500) - 80) / 5))}px)`, gridTemplateRows: `repeat(5, ${Math.min(38, Math.floor((Math.min(window.innerWidth, 500) - 80) / 5))}px)`,
       gap: '2px',
     });
 
@@ -607,7 +607,7 @@ export class PlayfairPuzzle extends Puzzle {
         const btn = document.createElement('button');
         btn.type = 'button';
         Object.assign(btn.style, {
-          width: '38px', height: '38px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: `${Math.min(38, Math.floor((Math.min(window.innerWidth, 500) - 80) / 5))}px`, height: `${Math.min(38, Math.floor((Math.min(window.innerWidth, 500) - 80) / 5))}px`, display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: '15px', fontWeight: '700', fontFamily: 'monospace',
           color: isFirstPick ? C_BG_DARK : (isCipherHL ? C_ERROR_RED : `${C_CREAM}cc`),
           background: isFirstPick ? C_MATRIX_GREEN : (isCipherHL ? `${C_ERROR_RED}1f` : C_DARK_PANEL),

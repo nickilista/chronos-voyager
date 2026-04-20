@@ -67,8 +67,8 @@ const C_CLAY       = '#3A5A8A';
 
 /* ── Canvas sizes ────────────────────────────────────────────── */
 
-const BOARD_W = 380;
-const BOARD_H = 342; // ~0.9 ratio
+function BOARD_W(): number { return Math.min(380, window.innerWidth - 48); }
+function BOARD_H(): number { return Math.round(BOARD_W() * 0.9); }
 
 /* ── Bone data ───────────────────────────────────────────────── */
 
@@ -278,17 +278,17 @@ export class AstragaloiPuzzle extends Puzzle {
     // Board wrapper (canvas + banner overlay)
     const boardWrap = document.createElement('div');
     Object.assign(boardWrap.style, {
-      position: 'relative', width: BOARD_W + 'px', height: BOARD_H + 'px',
+      position: 'relative', width: BOARD_W() + 'px', height: BOARD_H() + 'px',
       borderRadius: '8px', overflow: 'hidden',
       border: `2px solid rgba(212,175,55,0.25)`,
     });
 
     // Canvas for board background + bones
     const cvs = document.createElement('canvas');
-    cvs.width = BOARD_W * 2;
-    cvs.height = BOARD_H * 2;
+    cvs.width = BOARD_W() * 2;
+    cvs.height = BOARD_H() * 2;
     Object.assign(cvs.style, {
-      width: BOARD_W + 'px', height: BOARD_H + 'px', display: 'block',
+      width: BOARD_W() + 'px', height: BOARD_H() + 'px', display: 'block',
       // The bones are clickable targets — the pointer cursor is the
       // visual cue. We don't change it on non-bone areas because the
       // board background is also a click target for dismissing the
@@ -300,7 +300,7 @@ export class AstragaloiPuzzle extends Puzzle {
 
     // Click-to-select: hit-test against the cached bone AABBs drawn
     // last frame. event.offsetX/Y are already in CSS-pixel coords
-    // matching our BOARD_W × BOARD_H canvas, so no scaling needed.
+    // matching our BOARD_W() × BOARD_H() canvas, so no scaling needed.
     cvs.addEventListener('click', (ev) => {
       if (this.phase !== 'playing') return;
       const x = ev.offsetX;
@@ -406,49 +406,49 @@ export class AstragaloiPuzzle extends Puzzle {
   private drawBoard(): void {
     const c = this.ctx2d!;
     const s = 2;
-    c.clearRect(0, 0, BOARD_W * s, BOARD_H * s);
+    c.clearRect(0, 0, BOARD_W() * s, BOARD_H() * s);
     c.save();
     c.scale(s, s);
 
     // Deep Mediterranean blue gradient background
-    const grad = c.createLinearGradient(0, 0, BOARD_W, BOARD_H);
+    const grad = c.createLinearGradient(0, 0, BOARD_W(), BOARD_H());
     grad.addColorStop(0, '#0F1E38');
     grad.addColorStop(0.3, '#142848');
     grad.addColorStop(0.6, '#0F2240');
     grad.addColorStop(1, '#122640');
     c.fillStyle = grad;
-    c.fillRect(0, 0, BOARD_W, BOARD_H);
+    c.fillRect(0, 0, BOARD_W(), BOARD_H());
 
     // Subtle veins
     c.strokeStyle = 'rgba(74,144,217,0.04)';
     c.lineWidth = 0.5;
-    for (let i = 0; i < BOARD_W; i += 35) {
+    for (let i = 0; i < BOARD_W(); i += 35) {
       c.beginPath();
       c.moveTo(i, 0);
-      c.quadraticCurveTo(i + 20, BOARD_H / 2, i + 12, BOARD_H);
+      c.quadraticCurveTo(i + 20, BOARD_H() / 2, i + 12, BOARD_H());
       c.stroke();
     }
 
     // Double gold border
     c.strokeStyle = 'rgba(212,175,55,0.5)';
     c.lineWidth = 2;
-    this.roundRect(c, 6, 6, BOARD_W - 12, BOARD_H - 12, 8);
+    this.roundRect(c, 6, 6, BOARD_W() - 12, BOARD_H() - 12, 8);
     c.stroke();
     c.strokeStyle = 'rgba(212,175,55,0.25)';
     c.lineWidth = 1;
-    this.roundRect(c, 11, 11, BOARD_W - 22, BOARD_H - 22, 6);
+    this.roundRect(c, 11, 11, BOARD_W() - 22, BOARD_H() - 22, 6);
     c.stroke();
 
     // Greek key motif top
-    this.drawGreekKey(c, 3, 20, BOARD_W - 20, 8, 'rgba(212,175,55,0.22)');
+    this.drawGreekKey(c, 3, 20, BOARD_W() - 20, 8, 'rgba(212,175,55,0.22)');
     // Greek key bottom
-    this.drawGreekKey(c, BOARD_H - 7, 20, BOARD_W - 20, 8, 'rgba(212,175,55,0.22)');
+    this.drawGreekKey(c, BOARD_H() - 7, 20, BOARD_W() - 20, 8, 'rgba(212,175,55,0.22)');
 
     // Corner diamonds
     const cs = 5;
     const corners = [
-      { x: 14, y: 14 }, { x: BOARD_W - 14, y: 14 },
-      { x: 14, y: BOARD_H - 14 }, { x: BOARD_W - 14, y: BOARD_H - 14 },
+      { x: 14, y: 14 }, { x: BOARD_W() - 14, y: 14 },
+      { x: 14, y: BOARD_H() - 14 }, { x: BOARD_W() - 14, y: BOARD_H() - 14 },
     ];
     c.fillStyle = 'rgba(212,175,55,0.4)';
     for (const corner of corners) {
@@ -463,14 +463,14 @@ export class AstragaloiPuzzle extends Puzzle {
 
     // Target medallion (if playing or roundEnd)
     if (this.phase !== 'rolling') {
-      this.drawTargetMedallion(c, BOARD_W / 2, 60, 42);
+      this.drawTargetMedallion(c, BOARD_W() / 2, 60, 42);
     } else {
       // Rolling text
       c.fillStyle = 'rgba(212,175,55,0.7)';
       c.font = '500 14px Rajdhani, system-ui';
       c.textAlign = 'center';
       c.textBaseline = 'middle';
-      c.fillText('Rolling the bones...', BOARD_W / 2, 50);
+      c.fillText('Rolling the bones...', BOARD_W() / 2, 50);
     }
 
     // Draw bones on canvas. We also record an AABB for each so the
@@ -480,11 +480,11 @@ export class AstragaloiPuzzle extends Puzzle {
     // tests would frustrate players who click between the lobes.
     this.boneHitRects.length = 0;
     if (this.bones.length > 0) {
-      const boneW = Math.min(56, (BOARD_W - 60 - (this.bones.length - 1) * 12) / this.bones.length);
+      const boneW = Math.min(56, (BOARD_W() - 60 - (this.bones.length - 1) * 12) / this.bones.length);
       const boneH = boneW * 1.3;
       const totalW = this.bones.length * boneW + (this.bones.length - 1) * 12;
-      const startX = (BOARD_W - totalW) / 2;
-      const boneY = BOARD_H / 2 - boneH / 2 + 10;
+      const startX = (BOARD_W() - totalW) / 2;
+      const boneY = BOARD_H() / 2 - boneH / 2 + 10;
       const pad = 6;
 
       for (let i = 0; i < this.bones.length; i++) {
@@ -508,7 +508,7 @@ export class AstragaloiPuzzle extends Puzzle {
       c.textAlign = 'center';
       c.textBaseline = 'top';
       for (let i = 0; i < lines.length; i++) {
-        c.fillText(lines[i], BOARD_W / 2, BOARD_H - 50 + i * 14);
+        c.fillText(lines[i], BOARD_W() / 2, BOARD_H() - 50 + i * 14);
       }
     }
 

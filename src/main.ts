@@ -10,6 +10,7 @@ import type { ShipBuilderResult } from './shipbuilder/ShipBuilder.ts';
 import { SaveManager, type SaveData } from './core/SaveManager.ts';
 import { preloadAssets } from './gameplay/Assets.ts';
 import { prewarmCombatAssets } from './gameplay/PrewarmCombat.ts';
+import { IS_MOBILE } from './core/Platform.ts';
 
 /**
  * Boot sequence:
@@ -41,7 +42,7 @@ const renderer = new WebGLRenderer({
   stencil: false,
   depth: true,
 });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, IS_MOBILE ? 1.25 : 1.75));
 renderer.toneMapping = NoToneMapping;
 renderer.toneMappingExposure = 1.0;
 

@@ -36,8 +36,8 @@ const MIN_MOVES = minMovesFor(NUM_RINGS);
 
 /* ── Canvas dimensions ───────────────────────────────────────── */
 
-const CANVAS_W = 520;
-const CANVAS_H = Math.round(CANVAS_W * 0.55);
+function CANVAS_W(): number { return Math.min(520, window.innerWidth - 48); }
+function CANVAS_H(): number { return Math.round(CANVAS_W() * 0.55); }
 
 /* ── Colors (Chinese Bronze / Jade — matches iOS) ────────────── */
 
@@ -193,15 +193,15 @@ export class ChineseRingsPuzzle extends Puzzle {
     // Board canvas
     const boardWrap = document.createElement('div');
     Object.assign(boardWrap.style, {
-      position: 'relative', width: CANVAS_W + 'px', height: CANVAS_H + 'px',
+      position: 'relative', width: CANVAS_W() + 'px', height: CANVAS_H() + 'px',
       borderRadius: '12px', overflow: 'hidden',
       border: '1px solid rgba(205,127,50,0.3)',
     });
 
     const cvs = document.createElement('canvas');
-    cvs.width = CANVAS_W * 2;
-    cvs.height = CANVAS_H * 2;
-    Object.assign(cvs.style, { width: CANVAS_W + 'px', height: CANVAS_H + 'px', display: 'block', cursor: 'pointer' });
+    cvs.width = CANVAS_W() * 2;
+    cvs.height = CANVAS_H() * 2;
+    Object.assign(cvs.style, { width: CANVAS_W() + 'px', height: CANVAS_H() + 'px', display: 'block', cursor: 'pointer' });
     this.ctx2d = cvs.getContext('2d')!;
     cvs.addEventListener('click', (e) => this.handleCanvasClick(e));
     boardWrap.appendChild(cvs);
@@ -290,12 +290,12 @@ export class ChineseRingsPuzzle extends Puzzle {
   private drawBoard(): void {
     const c = this.ctx2d!;
     const s = 2;
-    c.clearRect(0, 0, CANVAS_W * s, CANVAS_H * s);
+    c.clearRect(0, 0, CANVAS_W() * s, CANVAS_H() * s);
     c.save();
     c.scale(s, s);
 
-    const W = CANVAS_W;
-    const H = CANVAS_H;
+    const W = CANVAS_W();
+    const H = CANVAS_H();
 
     // Background gradient
     const bg = c.createLinearGradient(0, 0, 0, H);
@@ -594,11 +594,11 @@ export class ChineseRingsPuzzle extends Puzzle {
     if (this.solved) return;
     const cvs = e.currentTarget as HTMLCanvasElement;
     const rect = cvs.getBoundingClientRect();
-    const mx = (e.clientX - rect.left) * (CANVAS_W / rect.width);
-    const my = (e.clientY - rect.top) * (CANVAS_H / rect.height);
+    const mx = (e.clientX - rect.left) * (CANVAS_W() / rect.width);
+    const my = (e.clientY - rect.top) * (CANVAS_H() / rect.height);
 
-    const W = CANVAS_W;
-    const H = CANVAS_H;
+    const W = CANVAS_W();
+    const H = CANVAS_H();
     const barY = H * 0.42;
     const spacing = this.ringSpacing(W);
     const startX = this.ringStartX(W);

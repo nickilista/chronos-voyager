@@ -170,8 +170,8 @@ function roundData(circuit: BLCircuit, round: number, inputs: boolean[]): BLRoun
 
 /* ── Canvas dimensions ────────────────────────────────────────── */
 
-const CANVAS_W = 380;
-const CANVAS_H = 200;
+function CANVAS_W(): number { return Math.min(380, window.innerWidth - 48); }
+function CANVAS_H(): number { return Math.round(CANVAS_W() * 200 / 380); }
 
 /* ── Puzzle class ─────────────────────────────────────────────── */
 
@@ -329,13 +329,13 @@ export class BooleanGatesPuzzle extends Puzzle {
     // Circuit canvas
     const canvasWrap = document.createElement('div');
     Object.assign(canvasWrap.style, {
-      position: 'relative', width: CANVAS_W + 'px', height: CANVAS_H + 'px',
+      position: 'relative', width: CANVAS_W() + 'px', height: CANVAS_H() + 'px',
       borderRadius: '10px', overflow: 'hidden', border: `1px solid ${C_MAROON}55`,
     });
     const cvs = document.createElement('canvas');
-    cvs.width = CANVAS_W * 2;
-    cvs.height = CANVAS_H * 2;
-    Object.assign(cvs.style, { width: CANVAS_W + 'px', height: CANVAS_H + 'px', display: 'block' });
+    cvs.width = CANVAS_W() * 2;
+    cvs.height = CANVAS_H() * 2;
+    Object.assign(cvs.style, { width: CANVAS_W() + 'px', height: CANVAS_H() + 'px', display: 'block' });
     this.ctx2d = cvs.getContext('2d')!;
     this.canvasEl = cvs;
     canvasWrap.appendChild(cvs);
@@ -388,8 +388,8 @@ export class BooleanGatesPuzzle extends Puzzle {
   private drawCircuit(): void {
     const c = this.ctx2d!;
     const s = 2;
-    const w = CANVAS_W;
-    const h = CANVAS_H;
+    const w = CANVAS_W();
+    const h = CANVAS_H();
     c.clearRect(0, 0, w * s, h * s);
     c.save();
     c.scale(s, s);

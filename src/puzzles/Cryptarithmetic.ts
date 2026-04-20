@@ -69,8 +69,8 @@ const LETTER_POOLS: string[][] = [
 
 /* ── Canvas dimensions ───────────────────────────────────────────── */
 
-const TABLET_W = 380;
-const TABLET_H = 230;
+function TABLET_W(): number { return Math.min(380, window.innerWidth - 48); }
+function TABLET_H(): number { return Math.round(TABLET_W() * 230 / 380); }
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
@@ -294,9 +294,9 @@ export class CryptarithmeticPuzzle extends Puzzle {
 
     // Equation canvas (marble tablet)
     const cvs = document.createElement('canvas');
-    cvs.width = TABLET_W * 2;
-    cvs.height = TABLET_H * 2;
-    Object.assign(cvs.style, { width: TABLET_W + 'px', height: TABLET_H + 'px', borderRadius: '14px' });
+    cvs.width = TABLET_W() * 2;
+    cvs.height = TABLET_H() * 2;
+    Object.assign(cvs.style, { width: TABLET_W() + 'px', height: TABLET_H() + 'px', borderRadius: '14px' });
     this.canvasEl = cvs;
     this.ctx2d = cvs.getContext('2d')!;
     panel.appendChild(cvs);
@@ -304,14 +304,14 @@ export class CryptarithmeticPuzzle extends Puzzle {
     // Letter row
     this.letterRowEl = document.createElement('div');
     Object.assign(this.letterRowEl.style, {
-      display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center', maxWidth: '420px',
+      display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center', maxWidth: 'min(420px, calc(100vw - 48px))',
     });
     panel.appendChild(this.letterRowEl);
 
     // Digit pad
     this.digitPadEl = document.createElement('div');
     Object.assign(this.digitPadEl.style, {
-      display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px', maxWidth: '320px', width: '100%',
+      display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px', maxWidth: 'min(320px, calc(100vw - 48px))', width: '100%',
     });
     panel.appendChild(this.digitPadEl);
 
@@ -348,8 +348,8 @@ export class CryptarithmeticPuzzle extends Puzzle {
   private drawTablet(): void {
     const c = this.ctx2d!;
     const s = 2;
-    const w = TABLET_W;
-    const h = TABLET_H;
+    const w = TABLET_W();
+    const h = TABLET_H();
     c.clearRect(0, 0, w * s, h * s);
     c.save();
     c.scale(s, s);
