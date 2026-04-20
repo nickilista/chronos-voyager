@@ -109,6 +109,9 @@ function initTouchOverlay(): void {
     /* Hide keyboard controls legend on touch devices */
     .touch-device .hud-controls { display: none !important; }
 
+    /* Hide touch flight controls during puzzles — they block puzzle interactions */
+    body.puzzle-active .touch-overlay { display: none !important; }
+
     .touch-overlay {
       position: fixed;
       inset: 0;

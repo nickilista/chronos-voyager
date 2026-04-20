@@ -774,6 +774,7 @@ export class Game {
     // advance puzzleStage, so the same puzzle will be waiting when they
     // re-enter the corridor and collect 10 ankhs again.
     this.hud.showExitButton(() => this.abandonPuzzle());
+    document.body.classList.add('puzzle-active');
   }
 
   private buildPuzzleForEra(eraId: string, stage: 0 | 1 | 2): Puzzle {
@@ -930,6 +931,7 @@ export class Game {
 
   private endPuzzle(): void {
     if (!this.puzzle || !this.puzzleFlow) return;
+    document.body.classList.remove('puzzle-active');
     const flow = this.puzzleFlow;
     this.scene.remove(this.puzzle.group);
     this.puzzle.dispose();
@@ -976,6 +978,7 @@ export class Game {
    */
   private abandonPuzzle(): void {
     if (!this.puzzle || !this.puzzleFlow) return;
+    document.body.classList.remove('puzzle-active');
     const flow = this.puzzleFlow;
     this.scene.remove(this.puzzle.group);
     this.puzzle.dispose();
