@@ -147,7 +147,14 @@ export const SaveManager = {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const parsed: unknown = JSON.parse(raw);
-      return migrate(parsed);
+      const save = migrate(parsed);
+      // TEMP: force-unlock all ships except golem for preview video
+      if (save) {
+        for (const cls of DEFAULT_UNLOCKED) {
+          if (!save.unlockedShips.includes(cls)) save.unlockedShips.push(cls);
+        }
+      }
+      return save;
     } catch {
       return null;
     }
