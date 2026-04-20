@@ -34,18 +34,26 @@ import { type WeaponKind, WEAPON_PALETTE } from './WeaponTypes.ts';
  * with 90ms fade → well under 12 even at full-auto.
  */
 
-const PROJECTILE_POOL_SIZE = 32;
+const PROJECTILE_POOL_SIZE = 48;
 const BEAM_POOL_SIZE = 12;
+const TRAIL_POOL_SIZE = 64;
 /** How long the beam line stays visible on screen after a shot. 90ms is
  *  long enough to register as a discrete "zap" without leaving a
  *  continuous laser-sword look. */
 const BEAM_VISUAL_DURATION = 0.09;
 /** Max projectile lifetime (safety cap independent of range). */
 const PROJECTILE_LIFETIME = 2.5;
-/** Tunable radii so the three kinds are visually distinct at a glance. */
+/** Tunable radii so each kind is visually distinct at a glance. */
 const BOLT_RADIUS = 0.16;
 const PULSE_RADIUS = 0.55;
 const BEAM_RADIUS = 0.14;
+const MISSILE_RADIUS = 0.42;
+const GATLING_RADIUS = 0.09;
+/** How often a missile spawns a new smoke puff behind itself (seconds). */
+const MISSILE_TRAIL_INTERVAL = 0.04;
+/** Lifetime of a single trail puff (seconds). Dictates how long the
+ *  smoky ribbon stays visible after the missile has passed. */
+const TRAIL_PUFF_LIFETIME = 0.55;
 
 interface Projectile {
   mesh: Mesh;
@@ -57,6 +65,19 @@ interface Projectile {
   range: number;
   damage: number;
   kind: WeaponKind; // never 'beam' while active — beams don't live here
+  active: boolean;
+  /** For missiles only: seconds since the last trail puff was emitted.
+   *  When > MISSILE_TRAIL_INTERVAL, a new puff is spawned at the
+   *  missile's current position. Unused for non-missile kinds. */
+  trailTimer: number;
+}
+
+interface TrailPuff {
+  mesh: Mesh;
+  material: MeshBasicMaterial;
+  life: number;
+  maxLife: number;
+  baseScale: number;
   active: boolean;
 }
 
@@ -80,17 +101,29 @@ export class Projectiles {
   private primaryCooldown = 0;
   private secondaryCooldown = 0;
 
-  // Shared materials per projectile kind, so a pulse bolt and a bolt bolt
-  // don't share geometry/material and don't need per-shot allocations.
+  // Shared materials + geometries per projectile kind. Pool slots swap
+  // their mesh.geometry / .material pointers when the kind changes
+  // between shots (a single slot might be a pulse one frame and a bolt
+  // the next) — zero allocations per-shot.
   private pulseMat!: MeshBasicMaterial;
   private boltMat!: MeshBasicMaterial;
+  private missileMat!: MeshBasicMaterial;
+  private gatlingMat!: MeshBasicMaterial;
   private pulseGeo!: SphereGeometry;
   private boltGeo!: SphereGeometry;
+  private missileGeo!: SphereGeometry;
+  private gatlingGeo!: SphereGeometry;
   /** Beam geometry is a unit cylinder along +Y; per-shot we scale Y to
    *  the beam length and rotate to point at the hit. Shared across all
    *  beams because the visual only differs in color, which the material
    *  owns — we clone the material per beam for independent fade. */
   private beamGeo!: CylinderGeometry;
+
+  // Trail puff pool — missiles emit short-lived grey embers that fade
+  // while shrinking, painting a visible smoky ribbon behind the
+  // ordnance. Also available to future kinds that want a trail.
+  private readonly trailPuffs: TrailPuff[] = [];
+  private trailPuffGeo!: SphereGeometry;
 
   init(scene: Scene): void {
     this.scene = scene;
@@ -99,7 +132,10 @@ export class Projectiles {
     // One geometry per projectile size — reused across the pool.
     this.pulseGeo = new SphereGeometry(PULSE_RADIUS, 12, 10);
     this.boltGeo = new SphereGeometry(BOLT_RADIUS, 10, 8);
+    this.missileGeo = new SphereGeometry(MISSILE_RADIUS, 12, 10);
+    this.gatlingGeo = new SphereGeometry(GATLING_RADIUS, 8, 6);
     this.beamGeo = new CylinderGeometry(BEAM_RADIUS, BEAM_RADIUS, 1, 10, 1, true);
+    this.trailPuffGeo = new SphereGeometry(0.38, 8, 6);
 
     this.pulseMat = new MeshBasicMaterial({
       color: WEAPON_PALETTE.pulse.core,
@@ -115,9 +151,25 @@ export class Projectiles {
       blending: AdditiveBlending,
       depthWrite: false,
     });
+    // Missiles: warm orange core. Not additive — we want the missile
+    // body to read as a solid object with a smoky plume, not a puff
+    // of light. The plume itself is additive via the trail puffs.
+    this.missileMat = new MeshBasicMaterial({
+      color: WEAPON_PALETTE.missile.core,
+      transparent: true,
+      opacity: 1,
+      depthWrite: false,
+    });
+    this.gatlingMat = new MeshBasicMaterial({
+      color: WEAPON_PALETTE.gatling.core,
+      transparent: true,
+      opacity: 0.95,
+      blending: AdditiveBlending,
+      depthWrite: false,
+    });
 
     // Projectile pool — allocate both geometries so we can swap a slot
-    // from bolt to pulse without reallocating. Initial state: bolt.
+    // between kinds without reallocating. Initial state: bolt.
     for (let i = 0; i < PROJECTILE_POOL_SIZE; i++) {
       const mesh = new Mesh(this.boltGeo, this.boltMat);
       mesh.visible = false;
@@ -134,6 +186,30 @@ export class Projectiles {
         damage: 0,
         kind: 'bolt',
         active: false,
+        trailTimer: 0,
+      });
+    }
+
+    // Trail puff pool. Each puff is a dim grey additive sphere that
+    // fades out while its scale shrinks — cheap visual for "the missile
+    // left something behind". Pool is plenty for worst-case
+    // (missile cooldown 0.45s × trail emit 0.04s × lifetime 0.55s ×
+    // ~5 concurrent missiles ≈ 68, so 64 is close enough; occasional
+    // drop is invisible at play speed).
+    for (let i = 0; i < TRAIL_POOL_SIZE; i++) {
+      const mat = new MeshBasicMaterial({
+        color: 0xddc8a8,
+        transparent: true,
+        opacity: 0,
+        blending: AdditiveBlending,
+        depthWrite: false,
+      });
+      const mesh = new Mesh(this.trailPuffGeo, mat);
+      mesh.visible = false;
+      mesh.frustumCulled = false;
+      this.group.add(mesh);
+      this.trailPuffs.push({
+        mesh, material: mat, life: 0, maxLife: 0, baseScale: 1, active: false,
       });
     }
 
@@ -222,15 +298,15 @@ export class Projectiles {
     origin: Vector3,
     direction: Vector3,
     shipVelWorld: Vector3,
-    kind: 'pulse' | 'bolt',
+    kind: Exclude<WeaponKind, 'beam'>,
     spec: { core: number; glow: number; speed: number; damage: number; cooldown: number; range: number },
   ): void {
     const slot = this.acquireProjectile();
     if (!slot) return;
     // Swap geometry/material if this slot was previously a different kind.
     if (slot.kind !== kind) {
-      slot.mesh.geometry = kind === 'pulse' ? this.pulseGeo : this.boltGeo;
-      slot.mesh.material = kind === 'pulse' ? this.pulseMat : this.boltMat;
+      slot.mesh.geometry = this.geoFor(kind);
+      slot.mesh.material = this.matFor(kind);
       slot.kind = kind;
     }
     slot.position.copy(origin);
@@ -240,9 +316,28 @@ export class Projectiles {
     slot.distanceTraveled = 0;
     slot.range = spec.range;
     slot.damage = spec.damage;
+    slot.trailTimer = 0;
     slot.mesh.position.copy(origin);
     slot.mesh.visible = true;
     slot.active = true;
+  }
+
+  private geoFor(kind: Exclude<WeaponKind, 'beam'>): SphereGeometry {
+    switch (kind) {
+      case 'pulse':   return this.pulseGeo;
+      case 'bolt':    return this.boltGeo;
+      case 'missile': return this.missileGeo;
+      case 'gatling': return this.gatlingGeo;
+    }
+  }
+
+  private matFor(kind: Exclude<WeaponKind, 'beam'>): MeshBasicMaterial {
+    switch (kind) {
+      case 'pulse':   return this.pulseMat;
+      case 'bolt':    return this.boltMat;
+      case 'missile': return this.missileMat;
+      case 'gatling': return this.gatlingMat;
+    }
   }
 
   update(dt: number, meteorites: Meteorites): void {
@@ -263,6 +358,17 @@ export class Projectiles {
       p.distanceTraveled += Math.hypot(stepX, stepY, stepZ);
       p.mesh.position.copy(p.position);
       p.life -= dt;
+
+      // Missile smoke trail. Emit a puff every
+      // MISSILE_TRAIL_INTERVAL seconds; puffs own their own fade so
+      // the ribbon gracefully thins out after the missile impacts.
+      if (p.kind === 'missile') {
+        p.trailTimer += dt;
+        if (p.trailTimer >= MISSILE_TRAIL_INTERVAL) {
+          p.trailTimer = 0;
+          this.emitTrailPuff(p.position);
+        }
+      }
 
       if (p.life <= 0 || p.distanceTraveled >= p.range) {
         this.deactivateProjectile(p);
@@ -286,20 +392,64 @@ export class Projectiles {
       // Linear fade 1→0 over BEAM_VISUAL_DURATION.
       b.material.opacity = Math.max(0, b.life / BEAM_VISUAL_DURATION);
     }
+
+    // ---- trail puffs ----
+    for (let i = 0; i < this.trailPuffs.length; i++) {
+      const t = this.trailPuffs[i];
+      if (!t.active) continue;
+      t.life -= dt;
+      if (t.life <= 0) {
+        t.active = false;
+        t.mesh.visible = false;
+        t.material.opacity = 0;
+        continue;
+      }
+      const k = t.life / t.maxLife; // 1 → 0
+      t.material.opacity = 0.8 * k;
+      // Puff grows as it fades so the trail has a soft blooming feel
+      // rather than a line of identical dots.
+      const scale = t.baseScale * (0.6 + 1.6 * (1 - k));
+      t.mesh.scale.setScalar(scale);
+    }
+  }
+
+  private emitTrailPuff(at: Vector3): void {
+    for (let i = 0; i < this.trailPuffs.length; i++) {
+      const t = this.trailPuffs[i];
+      if (t.active) continue;
+      t.active = true;
+      t.maxLife = TRAIL_PUFF_LIFETIME;
+      t.life = TRAIL_PUFF_LIFETIME;
+      t.baseScale = 0.85 + Math.random() * 0.4;
+      t.mesh.position.copy(at);
+      t.mesh.scale.setScalar(t.baseScale);
+      t.mesh.visible = true;
+      t.material.opacity = 0.8;
+      return;
+    }
+    // Pool exhausted — drop silently; missed trail frame is invisible
+    // at play speed and not worth evicting an in-flight puff for.
   }
 
   dispose(): void {
     // Shared geos + mats are owned by this class — free them.
     this.pulseGeo?.dispose();
     this.boltGeo?.dispose();
+    this.missileGeo?.dispose();
+    this.gatlingGeo?.dispose();
     this.beamGeo?.dispose();
+    this.trailPuffGeo?.dispose();
     this.pulseMat?.dispose();
     this.boltMat?.dispose();
+    this.missileMat?.dispose();
+    this.gatlingMat?.dispose();
     for (const b of this.beams) b.material.dispose();
+    for (const t of this.trailPuffs) t.material.dispose();
     if (this.scene) this.scene.remove(this.group);
     this.scene = null;
     this.projectiles.length = 0;
     this.beams.length = 0;
+    this.trailPuffs.length = 0;
   }
 
   // ---- internals ----

@@ -33,12 +33,19 @@ function isKey(code: string): boolean {
 }
 
 window.addEventListener('keydown', (e) => {
+  // Store BOTH the physical code (e.g. 'KeyK' — layout-agnostic) and
+  // the printed key (e.g. 'k' — layout-aware). That way
+  // `isKey('KeyK')` and `keys.has('k')` both light up and the game
+  // works on non-US keyboard layouts where the physical code may
+  // differ from the letter on the keycap.
   keys.add(e.code);
+  if (e.key && e.key.length === 1) keys.add(e.key.toLowerCase());
   // Prevent arrow keys from scrolling.
   if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
 });
 window.addEventListener('keyup', (e) => {
   keys.delete(e.code);
+  if (e.key && e.key.length === 1) keys.delete(e.key.toLowerCase());
 });
 window.addEventListener('blur', () => {
   keys.clear();
@@ -73,7 +80,13 @@ export function getInput(): InputState {
   const up = isKey('ArrowUp') || isKey('KeyW');
   const down = isKey('ArrowDown') || isKey('KeyS');
   const fireKey = isKey('KeyJ') || isKey('KeyF');
-  const fireSecondaryKey = isKey('KeyK') || isKey('KeyG');
+  // Generous fallback set for secondary fire — different keyboard
+  // layouts / remapping software occasionally mask one physical key,
+  // so we accept K, G, L (all near the right hand on QWERTY) plus the
+  // matching `e.key` values via the string-lowercase check.
+  const fireSecondaryKey =
+    isKey('KeyK') || isKey('KeyG') || isKey('KeyL') ||
+    keys.has('k') || keys.has('g') || keys.has('l');
   return {
     x: (right ? 1 : 0) - (left ? 1 : 0),
     y: (up ? 1 : 0) - (down ? 1 : 0),

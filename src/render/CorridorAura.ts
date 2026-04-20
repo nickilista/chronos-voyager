@@ -98,7 +98,7 @@ const FRAG = /* glsl */ `
     // look comes from color brightness modulation. This keeps the tube
     // equally visible and equally transparent from any distance — no
     // holes to disappear into, no sharp edges to alias.
-    float baseline = 0.06 * (1.0 - uOutside);
+    float baseline = 0.09 * (1.0 - uOutside);
     float innerGlow = uProximity * 0.32;
     float outerSkin = uOutside * 0.22;
     // Floor gets a small bump in alpha so the enriched pattern reads —
@@ -111,7 +111,7 @@ const FRAG = /* glsl */ `
     // an up/down axis rather than looking like a neutral tube.
     vec3 floorTint = mix(uTint, uTint * 1.4 + vec3(0.06, 0.04, 0.0), floorKSoft);
     vec3 color = floorTint * (0.4 + 0.85 * bands);
-    gl_FragColor = vec4(color, a * 0.3);
+    gl_FragColor = vec4(color, a * 0.36);
   }
 `;
 

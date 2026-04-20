@@ -18,7 +18,7 @@
  *             and a handful of smaller-caliber turrets.
  */
 
-export type WeaponKind = 'beam' | 'pulse' | 'bolt';
+export type WeaponKind = 'beam' | 'pulse' | 'bolt' | 'missile' | 'gatling';
 
 const BEAM_TYPES = new Set([
   'laser', 'beam', 'lance', 'mining_laser', 'sniper',
@@ -26,10 +26,18 @@ const BEAM_TYPES = new Set([
 const PULSE_TYPES = new Set([
   'plasma', 'pulse', 'acid', 'spore', 'flak', 'pulse_emitter',
 ]);
-// Everything else (railgun, gatling, machinegun, missile, stinger,
-// hidden_turret, point_defense, rivet_gun, light_turret) falls through to
-// BOLT as the default. A new weapon we add later will render as a bolt
-// unless we explicitly list it above — erring on the safe / generic side.
+/** Missile-class ordnance — slow, damaging, visible smoke trail. */
+const MISSILE_TYPES = new Set([
+  'missile', 'stinger',
+]);
+/** Rapid-fire small-caliber — many bullets per second, low damage each. */
+const GATLING_TYPES = new Set([
+  'gatling', 'machinegun', 'point_defense', 'light_turret', 'rivet_gun',
+]);
+// Anything not listed above (railgun, hidden_turret…) falls through to
+// BOLT as the safe default. Railgun is semantically a "fast slug", so bolt
+// is a reasonable fit — we'd want a dedicated render later if the fantasy
+// demands it.
 
 /**
  * Classify a raw weapon type string (as found in ships-config.json) into
@@ -41,6 +49,8 @@ export function weaponKindFor(type: string | undefined): WeaponKind {
   const t = type.toLowerCase();
   if (BEAM_TYPES.has(t)) return 'beam';
   if (PULSE_TYPES.has(t)) return 'pulse';
+  if (MISSILE_TYPES.has(t)) return 'missile';
+  if (GATLING_TYPES.has(t)) return 'gatling';
   return 'bolt';
 }
 
@@ -86,7 +96,16 @@ export const WEAPON_PALETTE: Record<WeaponKind, {
   /** Max effective range in world units. */
   range: number;
 }> = {
-  beam:  { core: 0xff4455, glow: 0xff99aa, speed: 0, damage: 28, cooldown: 0.20, range: 500 },
-  pulse: { core: 0x88ffdd, glow: 0x22cc99, speed: 120, damage: 18, cooldown: 0.15, range: 420 },
-  bolt:  { core: 0xffaa44, glow: 0xffdd88, speed: 220, damage: 14, cooldown: 0.09, range: 400 },
+  beam:    { core: 0xff4455, glow: 0xff99aa, speed: 0,   damage: 28, cooldown: 0.20, range: 500 },
+  pulse:   { core: 0x88ffdd, glow: 0x22cc99, speed: 120, damage: 18, cooldown: 0.15, range: 420 },
+  bolt:    { core: 0xffaa44, glow: 0xffdd88, speed: 220, damage: 14, cooldown: 0.09, range: 400 },
+  // Missiles: slow, heavy, with a visible smoke trail. High damage per
+  // shot, long cooldown — the player fires them deliberately, not on
+  // spray-and-pray. Range is longer so a tracked target across the
+  // horizon can still be hit.
+  missile: { core: 0xffd080, glow: 0xff6020, speed: 95,  damage: 45, cooldown: 0.45, range: 600 },
+  // Gatling / rapid-fire: small bright bullets, fast cooldown, low
+  // damage each. Visually distinct from plain 'bolt' by being half
+  // the size with a bluer tracer core.
+  gatling: { core: 0xcfe8ff, glow: 0x5fb8ff, speed: 260, damage: 8,  cooldown: 0.05, range: 320 },
 };
