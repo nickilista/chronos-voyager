@@ -187,9 +187,9 @@ export class ShipBuilder {
     const fillBelow = new DirectionalLight(0x223355, 0.2);
     fillBelow.position.set(0, -6, 1);
     this.scene.add(fillBelow);
-    // Platform underglow
-    const under = new PointLight(0x4488cc, 1.8, 8, 2.0);
-    under.position.set(0, -0.3, 0);
+    // Faint platform underglow (kept subtle to avoid bloom blowout)
+    const under = new PointLight(0x4488cc, 0.5, 5, 2.0);
+    under.position.set(0, -0.8, 0);
     this.scene.add(under);
 
     // Post-processing stack mirrors gameplay's so the handoff is seamless.

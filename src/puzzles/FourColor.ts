@@ -152,46 +152,78 @@ function buildLevel4(): FCMap {
 }
 
 function buildLevel5(): FCMap {
+  // 24-region map with shared vertices guaranteed to match exactly.
+  // Grid junctions defined once, then referenced by index.
+  const P: [number, number][] = [
+    // Row 0 (top edge) — 7 points
+    [0.02,0.02],[0.18,0.02],[0.34,0.02],[0.50,0.02],[0.66,0.02],[0.82,0.02],[0.98,0.02],
+    // Row 1 — 7 points (indices 7–13)
+    [0.02,0.18],[0.20,0.18],[0.36,0.20],[0.52,0.18],[0.68,0.20],[0.84,0.18],[0.98,0.18],
+    // Row 2 — 7 points (indices 14–20)
+    [0.02,0.34],[0.18,0.36],[0.36,0.34],[0.50,0.38],[0.66,0.34],[0.82,0.36],[0.98,0.34],
+    // Row 3 — 7 points (indices 21–27)
+    [0.02,0.52],[0.20,0.50],[0.34,0.52],[0.52,0.50],[0.68,0.52],[0.84,0.50],[0.98,0.52],
+    // Row 4 — 7 points (indices 28–34)
+    [0.02,0.68],[0.18,0.70],[0.36,0.68],[0.50,0.70],[0.66,0.68],[0.82,0.70],[0.98,0.68],
+    // Row 5 (bottom edge) — 7 points (indices 35–41)
+    [0.02,0.98],[0.20,0.98],[0.36,0.98],[0.52,0.98],[0.68,0.98],[0.84,0.98],[0.98,0.98],
+  ];
+  const v = (...indices: number[]): [number, number][] => indices.map(i => P[i]);
+  const cx = (...indices: number[]): [number, number] => {
+    let sx = 0, sy = 0;
+    for (const i of indices) { sx += P[i][0]; sy += P[i][1]; }
+    return [sx / indices.length, sy / indices.length];
+  };
   const regions: FCRegion[] = [
-    { id: 0, label: '1', vertices: [[0.02,0.02],[0.18,0.02],[0.16,0.15],[0.02,0.13]], center: [0.10,0.08], labelSize: 8 },
-    { id: 1, label: '2', vertices: [[0.18,0.02],[0.35,0.02],[0.33,0.13],[0.19,0.17],[0.16,0.15]], center: [0.26,0.08], labelSize: 8 },
-    { id: 2, label: '3', vertices: [[0.35,0.02],[0.52,0.02],[0.50,0.15],[0.36,0.15],[0.33,0.13]], center: [0.43,0.08], labelSize: 8 },
-    { id: 3, label: '4', vertices: [[0.52,0.02],[0.68,0.02],[0.66,0.13],[0.53,0.17],[0.50,0.15]], center: [0.59,0.08], labelSize: 8 },
-    { id: 4, label: '5', vertices: [[0.68,0.02],[0.84,0.02],[0.82,0.15],[0.66,0.13]], center: [0.75,0.08], labelSize: 8 },
-    { id: 5, label: '6', vertices: [[0.84,0.02],[0.98,0.02],[0.98,0.13],[0.82,0.15]], center: [0.91,0.08], labelSize: 8 },
-    { id: 6, label: '7', vertices: [[0.02,0.13],[0.16,0.15],[0.19,0.17],[0.20,0.32],[0.02,0.30]], center: [0.10,0.23], labelSize: 8 },
-    { id: 7, label: '8', vertices: [[0.19,0.17],[0.33,0.13],[0.36,0.15],[0.38,0.28],[0.20,0.32]], center: [0.27,0.22], labelSize: 8 },
-    { id: 8, label: '9', vertices: [[0.36,0.15],[0.50,0.15],[0.53,0.17],[0.66,0.13],[0.62,0.30],[0.38,0.28]], center: [0.50,0.21], labelSize: 8 },
-    { id: 9, label: '10', vertices: [[0.53,0.17],[0.66,0.13],[0.82,0.15],[0.80,0.32],[0.62,0.30]], center: [0.73,0.23], labelSize: 8 },
-    { id: 10, label: '11', vertices: [[0.82,0.15],[0.98,0.13],[0.98,0.30],[0.80,0.32]], center: [0.90,0.23], labelSize: 8 },
-    { id: 11, label: '12', vertices: [[0.02,0.30],[0.20,0.32],[0.22,0.50],[0.02,0.48]], center: [0.12,0.40], labelSize: 8 },
-    { id: 12, label: '13', vertices: [[0.20,0.32],[0.38,0.28],[0.50,0.35],[0.44,0.54],[0.42,0.52],[0.22,0.50]], center: [0.34,0.40], labelSize: 8 },
-    { id: 13, label: '14', vertices: [[0.38,0.28],[0.62,0.30],[0.60,0.50],[0.50,0.35]], center: [0.52,0.36], labelSize: 8 },
-    { id: 14, label: '15', vertices: [[0.62,0.30],[0.80,0.32],[0.78,0.52],[0.60,0.50]], center: [0.70,0.41], labelSize: 8 },
-    { id: 15, label: '16', vertices: [[0.80,0.32],[0.98,0.30],[0.98,0.50],[0.78,0.52]], center: [0.89,0.41], labelSize: 8 },
-    { id: 16, label: '17', vertices: [[0.02,0.48],[0.22,0.50],[0.25,0.70],[0.02,0.68]], center: [0.13,0.59], labelSize: 8 },
-    { id: 17, label: '18', vertices: [[0.22,0.50],[0.42,0.52],[0.44,0.54],[0.60,0.50],[0.58,0.68],[0.25,0.70]], center: [0.41,0.58], labelSize: 8 },
-    { id: 18, label: '19', vertices: [[0.60,0.50],[0.78,0.52],[0.76,0.70],[0.58,0.68]], center: [0.68,0.60], labelSize: 8 },
-    { id: 19, label: '20', vertices: [[0.78,0.52],[0.98,0.50],[0.98,0.70],[0.76,0.70]], center: [0.88,0.60], labelSize: 8 },
-    { id: 20, label: '21', vertices: [[0.02,0.68],[0.25,0.70],[0.28,0.98],[0.02,0.98]], center: [0.14,0.84], labelSize: 8 },
-    { id: 21, label: '22', vertices: [[0.25,0.70],[0.58,0.68],[0.55,0.98],[0.28,0.98]], center: [0.42,0.84], labelSize: 8 },
-    { id: 22, label: '23', vertices: [[0.58,0.68],[0.76,0.70],[0.74,0.98],[0.55,0.98]], center: [0.66,0.84], labelSize: 8 },
-    { id: 23, label: '24', vertices: [[0.76,0.70],[0.98,0.70],[0.98,0.98],[0.74,0.98]], center: [0.87,0.84], labelSize: 8 },
+    // Row 0–1
+    { id: 0,  label: '1',  vertices: v(0,1,8,7),           center: cx(0,1,8,7),       labelSize: 8 },
+    { id: 1,  label: '2',  vertices: v(1,2,9,8),            center: cx(1,2,9,8),       labelSize: 8 },
+    { id: 2,  label: '3',  vertices: v(2,3,10,9),           center: cx(2,3,10,9),      labelSize: 8 },
+    { id: 3,  label: '4',  vertices: v(3,4,11,10),          center: cx(3,4,11,10),     labelSize: 8 },
+    { id: 4,  label: '5',  vertices: v(4,5,12,11),          center: cx(4,5,12,11),     labelSize: 8 },
+    { id: 5,  label: '6',  vertices: v(5,6,13,12),          center: cx(5,6,13,12),     labelSize: 8 },
+    // Row 1–2
+    { id: 6,  label: '7',  vertices: v(7,8,15,14),          center: cx(7,8,15,14),     labelSize: 8 },
+    { id: 7,  label: '8',  vertices: v(8,9,16,15),          center: cx(8,9,16,15),     labelSize: 8 },
+    { id: 8,  label: '9',  vertices: v(9,10,11,18,17,16),   center: cx(9,10,17,16),    labelSize: 8 },
+    { id: 9,  label: '10', vertices: v(11,12,19,18),        center: cx(11,12,19,18),   labelSize: 8 },
+    { id: 10, label: '11', vertices: v(12,13,20,19),        center: cx(12,13,20,19),   labelSize: 8 },
+    // Row 2–3
+    { id: 11, label: '12', vertices: v(14,15,22,21),        center: cx(14,15,22,21),   labelSize: 8 },
+    { id: 12, label: '13', vertices: v(15,16,17,23,22),     center: cx(15,16,23,22),   labelSize: 8 },
+    { id: 13, label: '14', vertices: v(17,18,24,23),        center: cx(17,18,24,23),   labelSize: 8 },
+    { id: 14, label: '15', vertices: v(18,19,25,24),        center: cx(18,19,25,24),   labelSize: 8 },
+    { id: 15, label: '16', vertices: v(19,20,27,26,25),     center: cx(19,20,26,25),   labelSize: 8 },
+    // Row 3–4
+    { id: 16, label: '17', vertices: v(21,22,29,28),        center: cx(21,22,29,28),   labelSize: 8 },
+    { id: 17, label: '18', vertices: v(22,23,24,31,30,29),  center: cx(22,23,30,29),   labelSize: 8 },
+    { id: 18, label: '19', vertices: v(24,25,32,31),        center: cx(24,25,32,31),   labelSize: 8 },
+    { id: 19, label: '20', vertices: v(25,26,27,34,33,32),  center: cx(25,26,33,32),   labelSize: 8 },
+    // Row 4–5
+    { id: 20, label: '21', vertices: v(28,29,36,35),        center: cx(28,29,36,35),   labelSize: 8 },
+    { id: 21, label: '22', vertices: v(29,30,31,38,37,36),  center: cx(29,30,37,36),   labelSize: 8 },
+    { id: 22, label: '23', vertices: v(31,32,33,39,38),     center: cx(31,32,39,38),   labelSize: 8 },
+    { id: 23, label: '24', vertices: v(33,34,41,40,39),     center: cx(33,34,40,39),   labelSize: 8 },
   ];
   const adjacencies: [number, number][] = [
+    // Horizontal row 0-1
     [0,1],[1,2],[2,3],[3,4],[4,5],
-    [0,6],[1,7],[4,9],[5,10],
+    // Vertical 0-1 → 1-2
+    [0,6],[1,7],[2,8],[3,8],[4,9],[5,10],
+    // Horizontal row 1-2
     [6,7],[7,8],[8,9],[9,10],
-    [6,11],[7,12],[8,13],[9,14],[10,15],
+    // Vertical 1-2 → 2-3
+    [6,11],[7,12],[8,12],[8,13],[9,14],[10,15],
+    // Horizontal row 2-3
     [11,12],[12,13],[13,14],[14,15],
-    [11,16],[12,17],[14,18],[15,19],
+    // Vertical 2-3 → 3-4
+    [11,16],[12,17],[13,17],[13,18],[14,18],[14,19],[15,19],
+    // Horizontal row 3-4
     [16,17],[17,18],[18,19],
-    [16,20],[17,21],[18,22],[19,23],
+    // Vertical 3-4 → 4-5
+    [16,20],[17,21],[18,21],[18,22],[19,22],[19,23],
+    // Horizontal row 4-5
     [20,21],[21,22],[22,23],
-    [1,6],[2,7],[2,8],[3,8],[3,9],
-    [7,11],[8,12],[9,13],
-    [12,16],[13,17],[13,18],
-    [17,20],[17,22],[18,21],
   ];
   return { regions, adjacencies, prefilled: {}, hint: 'A dense colonial atlas. Work row by row, alternating colors.' };
 }
