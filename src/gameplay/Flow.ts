@@ -188,22 +188,63 @@ export class Flow {
   }
 
   /**
-   * Free-space LOD toggle: when the ship is outside every corridor we still
-   * want the 10 flow tubes visible as navigation targets, but their
-   * *interior* gameplay content (obstacles, collectibles, floor glyphs) is
-   * just invisible weight in the scene graph when viewed from the outside —
-   * the tubes are sealed by their aura membrane and you can't collide with
-   * anything inside from out there. Hide those heavy pools to free the GPU.
-   * The decor halo + corridor aura stay visible because they ARE the
-   * landmark that makes each flow readable on the galaxy map.
+   * Free-space LOD toggle. Three levels, trading mesh count for visible
+   * gameplay content:
+   *
+   *   • 'full'   — every obstacle / collectible / floor tile rendered.
+   *                What the active (nearest) flow always runs at, and
+   *                what every flow runs at when the ship is inside one.
+   *   • 'sparse' — only a fixed 1-in-10 stride of each pool is visible,
+   *                the rest are hidden. Keeps each flow's tube readably
+   *                populated from the galaxy map without paying the
+   *                ~2,200-mesh free-space tax. The stride is by index
+   *                so the same meshes always show — no flicker.
+   *   • 'none'   — all three subgroups hidden (use setVisible(false)
+   *                on the whole flow for a bigger hammer).
+   *
+   * The current obstacle pool is 200/flow, collectible pool is 10/flow,
+   * floor-glyph pool is ~24/flow. In 'sparse' mode that collapses to
+   * 20 + 1 + ~3 ≈ 24 meshes per flow instead of ~234 — x9 less.
    */
+  setInteriorLOD(level: 'full' | 'sparse' | 'none'): void {
+    if (level === 'none') {
+      this.track.group.visible = false;
+      this.collectibles.group.visible = false;
+      this.floorGlyphs.group.visible = false;
+      return;
+    }
+    this.track.group.visible = true;
+    this.collectibles.group.visible = true;
+    this.floorGlyphs.group.visible = true;
+
+    const stride = level === 'sparse' ? 10 : 1;
+    setStrideVisible(this.track.group.children, stride);
+    setStrideVisible(this.collectibles.group.children, stride);
+    setStrideVisible(this.floorGlyphs.group.children, stride);
+  }
+
+  /** @deprecated use setInteriorLOD('full' | 'none') — kept for back-compat. */
   setInteriorVisible(visible: boolean): void {
-    this.track.group.visible = visible;
-    this.collectibles.group.visible = visible;
-    this.floorGlyphs.group.visible = visible;
+    this.setInteriorLOD(visible ? 'full' : 'none');
   }
 
   resetCollectibles(): void {
     this.collectibles.reset();
+  }
+}
+
+/**
+ * Show every Nth child, hide the rest. Cheap: no traversal, no
+ * material writes, just a boolean flip per mesh. The active flow's
+ * full-LOD path passes stride=1 and this becomes a no-op that leaves
+ * everything visible — same cost as the previous `group.visible=true`.
+ */
+function setStrideVisible(children: readonly import('three').Object3D[], stride: number): void {
+  if (stride <= 1) {
+    for (let i = 0; i < children.length; i++) children[i].visible = true;
+    return;
+  }
+  for (let i = 0; i < children.length; i++) {
+    children[i].visible = i % stride === 0;
   }
 }

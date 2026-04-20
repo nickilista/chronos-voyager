@@ -206,15 +206,20 @@ export class FlowManager {
       const flowOutside = isActive ? this.outsideFactor : 1;
       const flowBoundary = isActive ? this.boundaryProximity : 0;
       this.flows[i].setVisible(isActive || shipInFreeSpace);
-      // Interiors are now kept visible ALWAYS — obstacles, collectibles,
-      // and floor glyphs render from free space too so the player sees
-      // every flow's gameplay content as they fly around the galaxy map.
-      // Previously the 9 non-active flows hid their interiors in free
-      // space as a perf optimisation (~2,200 fewer meshes), but it made
-      // the eras look empty from outside. If frame-time becomes a
-      // problem we'll revisit with a distance-based fade rather than a
-      // hard visibility gate.
-      this.flows[i].setInteriorVisible(true);
+      // Three-tier LOD for the interior (obstacles / collectibles /
+      // floor glyphs):
+      //   • Active flow      → 'full'   — everything on.
+      //   • Inside any flow  → 'full'   — we'll re-enter an instant
+      //     away, so keep them warm.
+      //   • Non-active + ship in free space → 'sparse' — 1-in-10 stride
+      //     of each pool renders. Player still sees gameplay content in
+      //     every tube from the galaxy map, without paying the full
+      //     ~2,200-mesh cost. Previously we either rendered all (recent:
+      //     choppy frame rate) or none (original: empty tubes); 10%
+      //     stride is the compromise.
+      const lod: 'full' | 'sparse' =
+        isActive || !shipInFreeSpace ? 'full' : 'sparse';
+      this.flows[i].setInteriorLOD(lod);
       this.flows[i].update(
         dt,
         shipWorld,
