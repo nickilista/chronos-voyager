@@ -94,8 +94,8 @@ let joystickOriginY = 0;
 let joystickOuter: HTMLDivElement | null = null;
 let joystickInner: HTMLDivElement | null = null;
 
-const JOYSTICK_RADIUS = 50; // outer ring radius (half of ~100px)
-const DEAD_ZONE = 10;       // px
+const JOYSTICK_RADIUS = 56; // outer ring radius — slightly larger for fat thumbs
+const DEAD_ZONE = 6;        // px — tight dead zone for responsive feel
 
 if (isTouchDevice) {
   document.body.classList.add('touch-device');
@@ -130,10 +130,10 @@ function initTouchOverlay(): void {
     /* Joystick ring (appears at touch origin) */
     .touch-joy-outer {
       position: absolute;
-      width: 100px; height: 100px;
+      width: 112px; height: 112px;
       border-radius: 50%;
-      border: 2px solid rgba(255,255,255,0.15);
-      background: rgba(255,255,255,0.04);
+      border: 2.5px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.05);
       transform: translate(-50%, -50%);
       display: none;
       pointer-events: none;
@@ -141,10 +141,10 @@ function initTouchOverlay(): void {
     .touch-joy-inner {
       position: absolute;
       left: 50%; top: 50%;
-      width: 44px; height: 44px;
+      width: 48px; height: 48px;
       border-radius: 50%;
-      background: rgba(95,200,255,0.6);
-      box-shadow: 0 0 12px rgba(95,200,255,0.35);
+      background: rgba(95,200,255,0.7);
+      box-shadow: 0 0 16px rgba(95,200,255,0.5);
       transform: translate(-50%, -50%);
       pointer-events: none;
     }
@@ -152,46 +152,44 @@ function initTouchOverlay(): void {
     /* Right-side action buttons */
     .touch-buttons {
       position: absolute;
-      right: 18px;
-      bottom: 110px;
+      right: 14px;
+      bottom: max(100px, calc(env(safe-area-inset-bottom, 0px) + 90px));
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 14px;
+      gap: 16px;
       pointer-events: auto;
     }
     .touch-btn {
-      width: 52px; height: 52px;
+      width: 60px; height: 60px;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      background: rgba(6,10,22,0.65);
-      border: 1.5px solid rgba(95,180,255,0.3);
-      color: rgba(230,250,255,0.85);
-      font-size: 20px;
+      background: rgba(6,10,22,0.75);
+      border: 2px solid rgba(95,180,255,0.35);
+      color: rgba(230,250,255,0.9);
+      font-size: 22px;
       line-height: 1;
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
       pointer-events: auto;
       touch-action: none;
       user-select: none;
       -webkit-user-select: none;
-      transition: background 0.1s, border-color 0.1s, box-shadow 0.1s;
+      /* No transition — instant feedback is critical for game controls */
     }
     .touch-btn.active {
-      background: rgba(20,50,90,0.85);
-      border-color: rgba(95,200,255,0.8);
-      box-shadow: 0 0 16px rgba(95,200,255,0.45);
+      background: rgba(30,80,140,0.9);
+      border-color: rgba(95,200,255,0.9);
+      box-shadow: 0 0 20px rgba(95,200,255,0.6);
     }
     .touch-btn-label {
       position: absolute;
-      right: 62px;
+      right: 70px;
       font-family: 'Rajdhani','Segoe UI',system-ui,sans-serif;
       font-size: 9px;
       letter-spacing: 0.15em;
       font-weight: 600;
-      color: rgba(159,230,255,0.5);
+      color: rgba(159,230,255,0.45);
       pointer-events: none;
       white-space: nowrap;
     }

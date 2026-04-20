@@ -746,10 +746,9 @@ const CSS = `
 @media (max-width: 600px) {
   .sb-root {
     grid-template-columns: 1fr;
-    grid-template-rows: auto 30vh auto auto auto;
+    grid-template-rows: auto auto auto auto;
     grid-template-areas:
       "header"
-      "scene"
       "bottom"
       "slots"
       "stats";
@@ -759,41 +758,45 @@ const CSS = `
     padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    /* Semi-transparent background so 3D ship preview shows through panels */
+    background: rgba(0, 0, 0, 0.35);
   }
   .sb-header {
     padding-left: 2px;
+    background: none;
   }
   .sb-title {
     font-size: clamp(16px, 5vw, 22px);
     letter-spacing: 0.14em;
   }
   .sb-subtitle { font-size: 10px; letter-spacing: 0.18em; }
-  /* Transparent scene spacer so the 3D ship preview behind shows through */
-  .sb-root::before {
-    content: '';
-    grid-area: scene;
-    pointer-events: none;
-  }
   .sb-panel {
-    max-height: none;
-    padding: 12px 12px 14px;
+    max-height: 40vh;
+    padding: 10px 10px 12px;
+    /* Slightly more transparent so ship is partially visible behind */
+    background: rgba(4, 8, 18, 0.82);
   }
   .sb-slots, .sb-stats {
-    max-height: none;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
-  .sb-slot { margin-bottom: 6px; }
-  .sb-slot-select { padding: 8px 10px; font-size: 14px; min-height: 44px; }
-  /* Launch button first (above module pickers) — most important CTA */
+  .sb-slot { margin-bottom: 5px; }
+  .sb-slot-label { font-size: 9px; }
+  .sb-slot-select { padding: 7px 8px; font-size: 13px; min-height: 44px; }
+  .sb-panel-title { font-size: 10px; margin-bottom: 10px; padding-bottom: 6px; }
+  /* Launch button first and prominent — most important CTA */
   .sb-bottom {
     flex-direction: column;
     gap: 8px;
   }
   .sb-launch {
     order: -1;
-    padding: 14px 20px;
+    padding: 16px 20px;
     width: 100%;
     border-radius: 8px;
+    box-shadow: 0 0 30px rgba(95, 200, 255, 0.5);
   }
+  .sb-launch-kicker { font-size: 9px; }
   .sb-launch-main { font-size: 18px; }
   .sb-launch-hint { display: none; }
   .sb-presets {
@@ -801,14 +804,15 @@ const CSS = `
     gap: 6px;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-    /* Horizontal scroll hint: fade right edge */
-    -webkit-mask-image: linear-gradient(to right, black 85%, transparent);
-    mask-image: linear-gradient(to right, black 85%, transparent);
+    -webkit-mask-image: linear-gradient(to right, black 80%, transparent);
+    mask-image: linear-gradient(to right, black 80%, transparent);
   }
-  .sb-preset { min-width: 80px; padding: 8px 10px; min-height: 44px; }
+  .sb-preset { min-width: 76px; padding: 7px 9px; min-height: 44px; }
   .sb-presets-label { font-size: 9px; padding-right: 6px; margin-right: 2px; }
-  .sb-stat-grid { row-gap: 4px; column-gap: 10px; }
+  .sb-stat-grid { row-gap: 3px; column-gap: 8px; }
   .sb-stat-label { font-size: 10px; }
-  .sb-stat-val { font-size: 12px; }
+  .sb-stat-val { font-size: 11px; }
+  .sb-bar-group { margin-bottom: 10px; }
+  .sb-specials-title { margin-top: 10px; margin-bottom: 6px; }
 }
 `;

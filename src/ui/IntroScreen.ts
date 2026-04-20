@@ -167,7 +167,7 @@ export function showIntro(): Promise<void> {
 <div class="intro-story" id="intro-story"></div>
 <div class="intro-divider" id="intro-divider"></div>
 <div class="intro-teaser" id="intro-teaser">${TEASER}</div>
-<div class="intro-continue" id="intro-continue">Press any key to continue</div>
+<div class="intro-continue" id="intro-continue">Tap to continue</div>
 `;
     document.body.appendChild(root);
 
