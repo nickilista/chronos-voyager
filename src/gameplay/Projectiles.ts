@@ -8,6 +8,7 @@ import {
   SphereGeometry,
   Vector3,
 } from 'three';
+import type { Enemies } from './Enemies.ts';
 import type { Meteorites } from './Meteorites.ts';
 import { type WeaponKind, WEAPON_PALETTE } from './WeaponTypes.ts';
 
@@ -340,7 +341,7 @@ export class Projectiles {
     }
   }
 
-  update(dt: number, meteorites: Meteorites): void {
+  update(dt: number, meteorites: Meteorites, enemies?: Enemies): void {
     this.primaryCooldown = Math.max(0, this.primaryCooldown - dt);
     this.secondaryCooldown = Math.max(0, this.secondaryCooldown - dt);
 
@@ -371,6 +372,14 @@ export class Projectiles {
       }
 
       if (p.life <= 0 || p.distanceTraveled >= p.range) {
+        this.deactivateProjectile(p);
+        continue;
+      }
+      // Enemies get tested BEFORE meteorites — a bullet that brushes
+      // both should credit the enemy (higher-value target + dedicated
+      // threat). Short-circuit on hit.
+      const enemyHit = enemies?.tryHit(p.position, p.direction, p.damage);
+      if (enemyHit) {
         this.deactivateProjectile(p);
         continue;
       }

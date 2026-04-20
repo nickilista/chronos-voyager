@@ -224,6 +224,30 @@ export const SaveManager = {
   },
 
   /**
+   * Batch version of awardPart — applies `count` parts to `cls`, used
+   * when an enemy is defeated and drops 5 pieces at once. Returns the
+   * final state (how many parts were actually granted given the unlock
+   * threshold, and whether the class unlocked during the batch).
+   */
+  awardParts(cls: ShipClass, count: number, save: SaveData): {
+    unlocked: boolean;
+    finalCount: number;
+    granted: number;
+  } {
+    if (save.unlockedShips.includes(cls) || cls === 'falcon') {
+      return { unlocked: false, finalCount: SHIP_PART_UNLOCK_THRESHOLD, granted: 0 };
+    }
+    const before = save.shipParts[cls] ?? 0;
+    const after = Math.min(before + count, SHIP_PART_UNLOCK_THRESHOLD);
+    save.shipParts[cls] = after;
+    if (after >= SHIP_PART_UNLOCK_THRESHOLD && !save.unlockedShips.includes(cls)) {
+      save.unlockedShips.push(cls);
+      return { unlocked: true, finalCount: after, granted: after - before };
+    }
+    return { unlocked: false, finalCount: after, granted: after - before };
+  },
+
+  /**
    * Death penalty: remove one collected part from a random in-progress
    * ship class. Only subtracts if the player has any uncollected-ship
    * class at `parts > 0` — if every locked ship is at 0 (or all are

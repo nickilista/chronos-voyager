@@ -32,6 +32,7 @@ import { getEnvHDR, preloadAssets } from './gameplay/Assets.ts';
 import { sphereVsAabb } from './gameplay/Collision.ts';
 import type { Flow } from './gameplay/Flow.ts';
 import { FlowManager } from './gameplay/FlowManager.ts';
+import { Enemies, ENEMY_REWARD_PARTS } from './gameplay/Enemies.ts';
 import { Meteorites, type MeteoriteType } from './gameplay/Meteorites.ts';
 import { Projectiles } from './gameplay/Projectiles.ts';
 import type { Obstacle } from './gameplay/obstacles/types.ts';
@@ -48,7 +49,7 @@ import {
 } from './portal/PortalSystem.ts';
 import { assembleShip } from './shipbuilder/ShipAssembly.ts';
 import type { ShipBuilderResult } from './shipbuilder/ShipBuilder.ts';
-import type { ShipConfig } from './shipbuilder/shipTypes.ts';
+import { SHIP_CLASSES, type ShipClass, type ShipConfig } from './shipbuilder/shipTypes.ts';
 import { AstragaloiPuzzle } from './puzzles/Astragaloi.ts';
 import { BooleanGatesPuzzle } from './puzzles/BooleanGates.ts';
 import { CardanoDicePuzzle } from './puzzles/CardanoDice.ts';
@@ -199,8 +200,9 @@ export class Game {
   private autoSaveTimer = 0;
   private static readonly AUTO_SAVE_INTERVAL = 30;
 
-  // --- Free-space combat: meteorite field + player projectiles ---
+  // --- Free-space combat: meteorite field + enemy ships + player projectiles ---
   private meteorites: Meteorites | null = null;
+  private enemies: Enemies | null = null;
   private projectiles: Projectiles | null = null;
   private explosions: ExplosionPool | null = null;
   /** Primary-weapon render kind, resolved once at start from the ship's
@@ -481,6 +483,19 @@ export class Game {
       const projectiles = new Projectiles();
       projectiles.init(this.scene);
       this.projectiles = projectiles;
+
+      // Enemies — spawn from classes the player hasn't unlocked yet.
+      // Defeat one → 5 parts of that class drop into the save at once.
+      // The list is refreshed whenever a class is (un)locked so a
+      // newly-unlocked ship stops appearing as an enemy.
+      const enemies = new Enemies({
+        onHitShip: (damage) => this.onMeteoriteHit(damage),
+        onDefeated: (position, cls) => this.onEnemyDefeated(position, cls),
+        onReward: (position, cls, parts) =>
+          this.onEnemyReward(position, cls, parts),
+      });
+      await enemies.init(this.scene, this.currentLockedClasses());
+      this.enemies = enemies;
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[Game] combat init failed', err);
@@ -1086,6 +1101,67 @@ export class Game {
   }
 
   /**
+   * List of ship classes the player hasn't unlocked yet — the pool
+   * enemies spawn from. Computed on demand from the live save so it
+   * reflects progress (and shrinks as the player unlocks).
+   */
+  private currentLockedClasses(): ShipClass[] {
+    return SHIP_CLASSES.filter(
+      (cls) => cls !== 'falcon' && !this.save.unlockedShips.includes(cls),
+    );
+  }
+
+  /**
+   * Player killed an enemy. VFX + camera shake; `onEnemyReward`
+   * handles the part-grant separately so the success arc lands as
+   * "boom → parts recovered → unlock" rather than one compound flash.
+   */
+  private onEnemyDefeated(position: Vector3, cls: ShipClass): void {
+    void cls;
+    if (this.explosions) this.explosions.play(position, 1.4); // slightly bigger than meteorite
+    const dist = position.distanceTo(this.ship.group.position);
+    const proximity = Math.max(0, 1 - dist / 180);
+    if (proximity > 0.05) {
+      this.shakeRemaining = Math.max(
+        this.shakeRemaining,
+        CRASH_SHAKE_DURATION * 0.6 * proximity,
+      );
+    }
+    getAudio().playCrash();
+  }
+
+  /**
+   * Apply the 5-part reward for defeating an enemy. Batched through
+   * `SaveManager.awardParts` so the unlock threshold is resolved in
+   * one step (no intermediate "unlocked mid-batch" state). Toast
+   * reads the final count so the player sees the jump.
+   */
+  private onEnemyReward(
+    _position: Vector3,
+    cls: ShipClass,
+    parts: number,
+  ): void {
+    const result = SaveManager.awardParts(cls, parts, this.save);
+    this.saveProgress();
+    // Refresh the enemy spawn pool — if we just unlocked this class,
+    // it shouldn't come back as an enemy.
+    if (this.enemies) this.enemies.setAvailableClasses(this.currentLockedClasses());
+    if (result.unlocked) {
+      getAudio().playEraComplete();
+      this.showUnlockToast(
+        `Ship unlocked: ${cls.toUpperCase()} (+${result.granted} parts)`,
+        'unlock',
+      );
+    } else if (result.granted > 0) {
+      getAudio().playPickup();
+      this.showUnlockToast(
+        `Enemy defeated: +${result.granted} ${cls.toUpperCase()} parts (${result.finalCount}/${SHIP_PART_UNLOCK_THRESHOLD})`,
+        'part',
+      );
+    }
+  }
+
+  /**
    * Brief HUD toast for part-drop / ship-unlock feedback. Builds a single
    * reused DOM element on first call, then just updates its text and
    * fades it in/out per call. Not worth a full HUD method — toasts are
@@ -1307,10 +1383,18 @@ export class Game {
           );
         }
       }
+      // Enemies tick BEFORE projectiles so their positions are
+      // current when bullet hit-tests fire this frame.
+      if (this.enemies) {
+        const canSpawnEnemy = outside > 0.7;
+        this.enemies.update(dt, this.ship.group.position, canSpawnEnemy);
+      }
       if (this.projectiles) {
         if (input.fire) this.fireFromShipNose('primary');
         if (input.fireSecondary) this.fireFromShipNose('secondary');
-        if (this.meteorites) this.projectiles.update(dt, this.meteorites);
+        if (this.meteorites) {
+          this.projectiles.update(dt, this.meteorites, this.enemies ?? undefined);
+        }
       }
       if (this.explosions) this.explosions.update(dt);
     }
