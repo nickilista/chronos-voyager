@@ -183,6 +183,13 @@ export class AstragaloiPuzzle extends Puzzle {
   // DOM
   private root: HTMLDivElement | null = null;
   private ctx2d: CanvasRenderingContext2D | null = null;
+  /** The canvas element itself — kept as a field so we can attach the
+   *  click-to-select handler once in mount() instead of per-frame. */
+  private canvasEl: HTMLCanvasElement | null = null;
+  /** AABB (CSS-pixel) of each drawn bone for click hit-testing. Refreshed
+   *  every `renderBoard()` call so the hit-zone stays aligned with the
+   *  currently rendered layout (bone count varies by level). */
+  private boneHitRects: Array<{ x: number; y: number; w: number; h: number }> = [];
   private overlayEl: HTMLDivElement | null = null;
   private hudEl: HTMLDivElement | null = null;
   private statusEl: HTMLDivElement | null = null;
@@ -280,8 +287,32 @@ export class AstragaloiPuzzle extends Puzzle {
     const cvs = document.createElement('canvas');
     cvs.width = BOARD_W * 2;
     cvs.height = BOARD_H * 2;
-    Object.assign(cvs.style, { width: BOARD_W + 'px', height: BOARD_H + 'px', display: 'block' });
+    Object.assign(cvs.style, {
+      width: BOARD_W + 'px', height: BOARD_H + 'px', display: 'block',
+      // The bones are clickable targets — the pointer cursor is the
+      // visual cue. We don't change it on non-bone areas because the
+      // board background is also a click target for dismissing the
+      // banner, and we want the affordance to feel lightweight.
+      cursor: 'pointer',
+    });
     this.ctx2d = cvs.getContext('2d')!;
+    this.canvasEl = cvs;
+
+    // Click-to-select: hit-test against the cached bone AABBs drawn
+    // last frame. event.offsetX/Y are already in CSS-pixel coords
+    // matching our BOARD_W × BOARD_H canvas, so no scaling needed.
+    cvs.addEventListener('click', (ev) => {
+      if (this.phase !== 'playing') return;
+      const x = ev.offsetX;
+      const y = ev.offsetY;
+      for (let i = 0; i < this.boneHitRects.length; i++) {
+        const r = this.boneHitRects[i];
+        if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+          this.tapBone(i);
+          return;
+        }
+      }
+    });
     boardWrap.appendChild(cvs);
 
     // Banner overlay container (inside board)
@@ -442,18 +473,30 @@ export class AstragaloiPuzzle extends Puzzle {
       c.fillText('Rolling the bones...', BOARD_W / 2, 50);
     }
 
-    // Draw bones on canvas
+    // Draw bones on canvas. We also record an AABB for each so the
+    // canvas click handler can hit-test. The rect is slightly padded
+    // outward so hitting "near enough" the hourglass silhouette still
+    // registers — the hourglass has pinched sides and strict pixel
+    // tests would frustrate players who click between the lobes.
+    this.boneHitRects.length = 0;
     if (this.bones.length > 0) {
       const boneW = Math.min(56, (BOARD_W - 60 - (this.bones.length - 1) * 12) / this.bones.length);
       const boneH = boneW * 1.3;
       const totalW = this.bones.length * boneW + (this.bones.length - 1) * 12;
       const startX = (BOARD_W - totalW) / 2;
       const boneY = BOARD_H / 2 - boneH / 2 + 10;
+      const pad = 6;
 
       for (let i = 0; i < this.bones.length; i++) {
         const x = startX + i * (boneW + 12);
         const selected = this.selectedFirst === i;
         this.drawBone(c, x, boneY, boneW, boneH, this.bones[i].value, selected);
+        this.boneHitRects.push({
+          x: x - pad,
+          y: boneY - pad,
+          w: boneW + pad * 2,
+          h: boneH + pad * 2,
+        });
       }
     }
 
@@ -783,39 +826,18 @@ export class AstragaloiPuzzle extends Puzzle {
     }
   }
 
+  /**
+   * Bone selection happens via direct canvas clicks now (see the click
+   * handler installed in mount()), so this DOM row of duplicate buttons
+   * is redundant — we keep the element around in case we ever need a
+   * fallback accessibility layer, but hide it unconditionally. If a
+   * screen reader needs tap targets we'll reintroduce it behind a
+   * media-query / setting instead.
+   */
   private refreshBonesRow(): void {
     if (!this.bonesRowEl) return;
     this.bonesRowEl.innerHTML = '';
-    if (this.phase !== 'playing') {
-      this.bonesRowEl.style.display = 'none';
-      return;
-    }
-    this.bonesRowEl.style.display = 'flex';
-
-    for (let i = 0; i < this.bones.length; i++) {
-      const bone = this.bones[i];
-      const isSelected = this.selectedFirst === i;
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      const display = [1, 3, 4, 6].includes(bone.value) ? String(bone.value) : greekNumeral(bone.value);
-      btn.textContent = display;
-      btn.title = String(bone.value);
-      Object.assign(btn.style, {
-        width: '52px', height: '52px', padding: '0',
-        background: isSelected ? 'rgba(74,144,217,0.2)' : 'rgba(255,248,231,0.08)',
-        border: isSelected ? `2px solid ${C_BLUE}` : '1px solid rgba(139,123,90,0.4)',
-        color: '#3A2A1A', fontFamily: 'inherit', fontSize: '18px', fontWeight: '700',
-        borderRadius: '10px', cursor: 'pointer',
-        boxShadow: isSelected ? `0 0 12px rgba(74,144,217,0.3)` : 'none',
-        transition: 'background 0.15s, border-color 0.15s',
-      });
-      // Light bone background
-      btn.style.background = isSelected
-        ? `linear-gradient(135deg, rgba(74,144,217,0.2), rgba(232,213,176,0.3))`
-        : `linear-gradient(135deg, #FFF8E7, #E8D5B0)`;
-      btn.addEventListener('click', () => this.tapBone(i));
-      this.bonesRowEl.appendChild(btn);
-    }
+    this.bonesRowEl.style.display = 'none';
   }
 
   private refreshOpsRow(): void {
