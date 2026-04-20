@@ -1,4 +1,5 @@
 import { type Camera, Vector3 } from 'three';
+import type { Enemies } from './Enemies.ts';
 import type { Meteorites } from './Meteorites.ts';
 
 const _scratch = new Vector3();
@@ -6,18 +7,22 @@ const _scratch = new Vector3();
 /**
  * Soft lock-on aim assist.
  *
- * Rules the player deduces without being told:
- *   1. Pointing near a meteorite for 2 seconds locks onto it — a red
- *      bracket appears on the target and bullets auto-aim at it.
- *   2. Looking away or letting the target die resets the timer.
- *   3. Switching to a different meteorite (closer to center) resets the
- *      timer for the new candidate rather than carrying it over — this
- *      stops accidental locks on rocks that happened to pass through
- *      the crosshair for half a second.
+ * Two target classes, different dwell rules:
  *
- * The "cone" is expressed as a max angle between ship-forward and the
- * line to the meteorite. 12 degrees is roughly where a reticle is still
- * usefully aimed; 2 seconds of dwell inside that cone is the lock.
+ *   • Meteorites — dwell-to-lock. Point near a rock for 2 seconds inside
+ *     the lock cone and the crosshair latches. Looking away or switching
+ *     rocks resets the timer.
+ *   • Enemy ships — INSTANT lock. The moment ship-forward lands inside
+ *     the cone on an enemy, we jump straight to locked. Enemies are
+ *     rarer + more important to hit, and 2s of "wait to aim assist"
+ *     during a duel felt wrong.
+ *
+ * When both an enemy AND a meteorite are in the cone, the enemy wins
+ * regardless of which is more closely aligned — a duel target always
+ * takes priority over ambient debris.
+ *
+ * The "cone" is the max angle between ship-forward and the line to the
+ * target. 12 degrees is the usable-aim zone.
  */
 
 const LOCK_CONE_COS = Math.cos((12 * Math.PI) / 180); // ~11.7° half-angle
@@ -43,24 +48,23 @@ export interface AimAssistState {
   dwell01: number;
   /** True iff dwell reached the lock threshold. */
   locked: boolean;
+  /** True when the current target is an enemy ship (vs a meteorite).
+   *  The crosshair uses this to skip drawing the progress arc — enemy
+   *  locks are instant, so a "filling" ring would just flash for one
+   *  frame and look buggy. */
+  isEnemyTarget: boolean;
 }
 
 export class AimAssist {
   /** The currently-watched target (may or may not be locked yet). Set
    *  to null when nothing is in the cone. */
-  private target: { id: object; world: Vector3 } | null = null;
+  private target: { id: object; world: Vector3; isEnemy: boolean } | null = null;
   private dwell = 0;
 
   /**
-   * Walk the meteorite list, find the one closest to the ship's forward
-   * direction that lies within the lock cone, and advance / reset the
-   * dwell timer accordingly.
-   *
-   * @param dt           frame delta in seconds
-   * @param shipPos      world-space ship position
-   * @param shipForward  unit vector, world-space ship forward direction
-   * @param camera       camera used for world → screen projection
-   * @param meteorites   free-space meteorite pool
+   * Walk the meteorite + enemy lists, find the best candidate in the
+   * lock cone (enemies preferred over meteorites), and advance / reset
+   * the dwell timer. Enemy targets skip the dwell entirely.
    */
   update(
     dt: number,
@@ -68,40 +72,73 @@ export class AimAssist {
     shipForward: Vector3,
     camera: Camera,
     meteorites: Meteorites,
+    enemies?: Enemies,
   ): AimAssistState {
-    // Scan: find the meteorite most aligned with ship-forward.
-    const active = meteorites.getActive();
-    let bestAlignment = LOCK_CONE_COS;
-    let best: { id: object; world: Vector3 } | null = null;
-    for (let i = 0; i < active.length; i++) {
-      const m = active[i];
-      const dx = m.position.x - shipPos.x;
-      const dy = m.position.y - shipPos.y;
-      const dz = m.position.z - shipPos.z;
-      const len = Math.hypot(dx, dy, dz);
-      if (len < 1e-3) continue;
-      const dot =
-        (dx * shipForward.x + dy * shipForward.y + dz * shipForward.z) / len;
-      if (dot > bestAlignment) {
-        bestAlignment = dot;
-        best = { id: m, world: m.position };
+    // Scan enemies FIRST — they outrank any meteorite within the cone.
+    // We still need to know if ANY enemy is in the cone; if so, pick
+    // the most aligned one.
+    let bestEnemyAlignment = LOCK_CONE_COS;
+    let bestEnemy: { id: object; world: Vector3 } | null = null;
+    if (enemies) {
+      const ea = enemies.getActive();
+      for (let i = 0; i < ea.length; i++) {
+        const e = ea[i];
+        const dx = e.position.x - shipPos.x;
+        const dy = e.position.y - shipPos.y;
+        const dz = e.position.z - shipPos.z;
+        const len = Math.hypot(dx, dy, dz);
+        if (len < 1e-3) continue;
+        const dot =
+          (dx * shipForward.x + dy * shipForward.y + dz * shipForward.z) / len;
+        if (dot > bestEnemyAlignment) {
+          bestEnemyAlignment = dot;
+          bestEnemy = { id: e, world: e.position };
+        }
       }
     }
 
-    // Advance / reset dwell. `id` is a stable object reference (the
-    // MeteoriteInstance itself) so we can cheaply tell "same target" vs
-    // "switched target" without comparing positions.
+    let best: { id: object; world: Vector3; isEnemy: boolean } | null = null;
+    if (bestEnemy) {
+      best = { id: bestEnemy.id, world: bestEnemy.world, isEnemy: true };
+    } else {
+      // No enemy in cone — fall back to scanning meteorites for a
+      // dwell-style lock candidate.
+      let bestAlignment = LOCK_CONE_COS;
+      const active = meteorites.getActive();
+      for (let i = 0; i < active.length; i++) {
+        const m = active[i];
+        const dx = m.position.x - shipPos.x;
+        const dy = m.position.y - shipPos.y;
+        const dz = m.position.z - shipPos.z;
+        const len = Math.hypot(dx, dy, dz);
+        if (len < 1e-3) continue;
+        const dot =
+          (dx * shipForward.x + dy * shipForward.y + dz * shipForward.z) / len;
+        if (dot > bestAlignment) {
+          bestAlignment = dot;
+          best = { id: m, world: m.position, isEnemy: false };
+        }
+      }
+    }
+
+    // Advance / reset dwell. Enemy targets skip the timer entirely and
+    // go straight to locked state; meteorites accumulate as before.
     if (best == null) {
       this.target = null;
       this.dwell = 0;
     } else if (this.target == null || this.target.id !== best.id) {
       this.target = best;
-      this.dwell = 0;
+      this.dwell = best.isEnemy ? LOCK_DWELL_SECONDS : 0;
     } else {
-      this.dwell = Math.min(LOCK_DWELL_SECONDS, this.dwell + dt);
-      // Keep the world-pos fresh — the MeteoriteInstance reuses the
-      // same Vector3 every frame, but storing the reference (not a
-      // clone) means we naturally stay up to date.
+      if (best.isEnemy) {
+        // Already locked on enemy; just keep it pinned at threshold.
+        this.dwell = LOCK_DWELL_SECONDS;
+      } else {
+        this.dwell = Math.min(LOCK_DWELL_SECONDS, this.dwell + dt);
+      }
+      // Keep the world-pos fresh — the source instance reuses the same
+      // Vector3 every frame, but storing the reference (not a clone)
+      // means we naturally stay up to date.
       this.target.world = best.world;
     }
 
@@ -118,6 +155,7 @@ export class AimAssist {
       targetWorld: this.target ? this.target.world : null,
       dwell01,
       locked,
+      isEnemyTarget: this.target ? this.target.isEnemy : false,
     };
   }
 
@@ -169,7 +207,7 @@ export class AimAssist {
    * NDC x/y to [0, window.innerWidth/Height].
    */
   private projectToScreen(world: Vector3, camera: Camera): { x: number; y: number } | null {
-    // Clone so `.project()` doesn't mutate the meteorite's live position.
+    // Clone so `.project()` doesn't mutate the target's live position.
     const v = _scratch.copy(world);
     v.project(camera);
     if (v.z > 1 || v.z < -1) return null;

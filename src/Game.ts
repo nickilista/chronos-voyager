@@ -225,6 +225,7 @@ export class Game {
     targetWorld: null,
     dwell01: 0,
     locked: false,
+    isEnemyTarget: false,
   };
   /** Full save blob we mutate in place when a meteorite drop awards a ship
    *  part. Persisted via SaveManager.save(); keeping a single object around
@@ -1379,11 +1380,17 @@ export class Game {
           forward,
           this.camera,
           this.meteorites,
+          this.enemies ?? undefined,
         );
         if (this.crosshair) {
+          // When the target is an enemy, the lock is instant and the
+          // progress arc would just pop to full for one frame — pass
+          // dwell=1 so the ring is either full or hidden, never an
+          // in-progress state that looks buggy.
+          const dwellForHud = this.aimState.isEnemyTarget ? 1 : this.aimState.dwell01;
           this.crosshair.update(
             this.aimState.targetScreen,
-            this.aimState.dwell01,
+            dwellForHud,
             this.aimState.locked,
           );
         }

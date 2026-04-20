@@ -45,7 +45,10 @@ const HULL_URL = (cls: ShipClass): string =>
 /** Spawn cadence (seconds). Randomised uniformly in this range so the
  *  player can't time-lock the next attack. */
 const SPAWN_INTERVAL: [number, number] = [45, 90];
-const MAX_CONCURRENT = 2;
+/** Only one enemy ship may harass the player at a time. Two felt like a
+ *  dogpile — attention kept breaking between both enemies and the
+ *  meteorite field; one focused duel is cleaner. */
+const MAX_CONCURRENT = 1;
 /** How far ahead of the ship enemies spawn. Further than meteorites
  *  (400) so there's visible warning — the enemy grows larger as it
  *  closes, rather than popping in next to the ship. */
@@ -308,6 +311,16 @@ export class Enemies {
     this.bulletMat?.dispose();
     if (this.scene) this.scene.remove(this.group);
     this.scene = null;
+  }
+
+  /**
+   * Read-only view of the currently-live enemies. Used by the aim-assist
+   * so it can promote an enemy to an instant lock (no dwell) when the
+   * player points at it — enemies are scarcer + more important than
+   * meteorites, so the lag-in feels wrong for them.
+   */
+  getActive(): readonly { position: Vector3 }[] {
+    return this.active;
   }
 
   // ---- internals ----
