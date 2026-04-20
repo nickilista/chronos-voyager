@@ -1,12 +1,18 @@
 import {
   AmbientLight,
+  BoxGeometry,
   Color,
   DirectionalLight,
   EquirectangularReflectionMapping,
   Fog,
+  Group,
+  Mesh,
+  MeshStandardMaterial,
+  OctahedronGeometry,
   type Object3D,
   PerspectiveCamera,
   PMREMGenerator,
+  PointLight,
   Scene,
   Vector2,
   Vector3,
@@ -49,7 +55,7 @@ import {
 } from './portal/PortalSystem.ts';
 import { assembleShip } from './shipbuilder/ShipAssembly.ts';
 import type { ShipBuilderResult } from './shipbuilder/ShipBuilder.ts';
-import { SHIP_CLASSES, type ShipClass, type ShipConfig } from './shipbuilder/shipTypes.ts';
+import { SHIP_CLASSES, SHIP_SLOTS, type ShipClass, type ShipConfig, type ShipSlot } from './shipbuilder/shipTypes.ts';
 import { AstragaloiPuzzle } from './puzzles/Astragaloi.ts';
 import { BooleanGatesPuzzle } from './puzzles/BooleanGates.ts';
 import { CardanoDicePuzzle } from './puzzles/CardanoDice.ts';
@@ -232,6 +238,29 @@ export class Game {
    *  means the ship-parts progression and the existing HP/shield/puzzle
    *  state live in one source of truth. */
   private save: SaveData;
+
+  // --- Floating ship-part drops ---
+  private readonly partDrops: {
+    group: Group;
+    shipClass: ShipClass;
+    slot: ShipSlot;
+    label: string;
+    age: number;
+  }[] = [];
+  private static readonly DROP_PICKUP_RADIUS = 6;
+  private static readonly DROP_LIFETIME = 30; // seconds before despawn
+  private static readonly DROP_COLORS: Record<string, number> = {
+    falcon: 0xf5d060, titan: 0xc0c0d0, phantom: 0x6040a0,
+    viper: 0x40c040, mantis: 0x80e060, centurion: 0xa04040,
+    nova: 0x60a0ff, kraken: 0x30d0a0, valkyrie: 0xd080c0,
+    golem: 0x8a7050,
+  };
+  private static readonly SLOT_NAMES: Record<ShipSlot, string> = {
+    hull: 'Hull', cockpit: 'Cockpit', wing_L: 'Left Wing', wing_R: 'Right Wing',
+    engine_main: 'Main Engine', engine_aux: 'Aux Engine',
+    weapon_primary: 'Primary Weapon', weapon_secondary: 'Secondary Weapon',
+    shield: 'Shield', tail: 'Tail',
+  };
 
   // --- Vibe Jam 2026 portal webring ---
   private readonly portalQuery: PortalQuery;
@@ -1103,26 +1132,97 @@ export class Game {
   }
 
   /**
-   * Meteorite dropped a ship-part reward. Awards it to a random still-
-   * locked ship class. When that class crosses the unlock threshold we
-   * persist immediately and pop a toast so the player knows the hangar
-   * just gained a slot.
+   * Meteorite dropped a ship-part reward. Spawns a floating 3D pickup
+   * at the destruction site. The player must fly over it to collect.
    */
-  private onMeteoriteDrop(position: Vector3, type: MeteoriteType): void {
-    void position;
-    void type;
+  private onMeteoriteDrop(position: Vector3, _type: MeteoriteType): void {
     const lockedClass = SaveManager.pickRandomLockedClass(this.save);
-    if (!lockedClass) return; // every ship already unlocked — nothing to award
-    const result = SaveManager.awardPart(lockedClass, this.save);
+    if (!lockedClass) return;
+
+    // Pick a random slot for flavor
+    const slot = SHIP_SLOTS[Math.floor(Math.random() * SHIP_SLOTS.length)];
+    const slotName = Game.SLOT_NAMES[slot];
+    const label = `${slotName} ${lockedClass.charAt(0).toUpperCase() + lockedClass.slice(1)}`;
+
+    // Build a glowing octahedron (diamond) pickup
+    const color = Game.DROP_COLORS[lockedClass] ?? 0xffffff;
+    const group = new Group();
+
+    const gem = new Mesh(
+      new OctahedronGeometry(1.2, 0),
+      new MeshStandardMaterial({
+        color, emissive: new Color(color), emissiveIntensity: 0.6,
+        roughness: 0.2, metalness: 0.8, transparent: true, opacity: 0.9,
+      }),
+    );
+    group.add(gem);
+
+    // Small cube orbiting the gem
+    const cube = new Mesh(
+      new BoxGeometry(0.4, 0.4, 0.4),
+      new MeshStandardMaterial({
+        color: 0xffffff, emissive: new Color(color), emissiveIntensity: 1.0,
+        roughness: 0.1, metalness: 0.9,
+      }),
+    );
+    cube.position.set(2, 0, 0);
+    group.add(cube);
+
+    // Point light for glow
+    const glow = new PointLight(color, 2, 15, 1.5);
+    group.add(glow);
+
+    group.position.copy(position);
+    this.scene.add(group);
+    this.partDrops.push({ group, shipClass: lockedClass, slot, label, age: 0 });
+
+    // Show the part name as a hint toast
+    this.showUnlockToast(`${label} dropped — fly to collect!`, 'part');
+  }
+
+  /** Tick floating drops: spin, bob, check pickup, despawn. */
+  private updatePartDrops(dt: number): void {
+    for (let i = this.partDrops.length - 1; i >= 0; i--) {
+      const drop = this.partDrops[i];
+      drop.age += dt;
+
+      // Spin + bob
+      drop.group.rotation.y += dt * 2.0;
+      drop.group.position.y += Math.sin(drop.age * 2.5) * dt * 0.8;
+      // Orbiting cube
+      const cube = drop.group.children[1];
+      if (cube) {
+        const a = drop.age * 3;
+        cube.position.set(Math.cos(a) * 2, Math.sin(a * 1.3) * 0.5, Math.sin(a) * 2);
+      }
+
+      // Pickup check
+      const dist = drop.group.position.distanceTo(this.ship.group.position);
+      if (dist < Game.DROP_PICKUP_RADIUS) {
+        this.collectPartDrop(drop);
+        this.scene.remove(drop.group);
+        this.partDrops.splice(i, 1);
+        continue;
+      }
+
+      // Despawn after lifetime
+      if (drop.age > Game.DROP_LIFETIME) {
+        this.scene.remove(drop.group);
+        this.partDrops.splice(i, 1);
+      }
+    }
+  }
+
+  private collectPartDrop(drop: { shipClass: ShipClass; label: string }): void {
+    const result = SaveManager.awardPart(drop.shipClass, this.save);
     this.saveProgress();
-    // Toast: "Part collected · <class> 2/10" or the unlock flourish.
     if (result.unlocked) {
       getAudio().playEraComplete();
-      this.showUnlockToast(`Ship unlocked: ${lockedClass.toUpperCase()}`, 'unlock');
+      this.showUnlockToast(`Ship unlocked: ${drop.shipClass.toUpperCase()}`, 'unlock');
     } else {
       getAudio().playPickup();
       this.showUnlockToast(
-        `Part collected · ${lockedClass.toUpperCase()} ${result.count}/${SHIP_PART_UNLOCK_THRESHOLD}`,
+        `${drop.label} collected · ${result.count}/${SHIP_PART_UNLOCK_THRESHOLD}`,
         'part',
       );
     }
@@ -1389,6 +1489,7 @@ export class Game {
       if (this.meteorites) {
         const canSpawn = outside > 0.7;
         this.meteorites.update(dt, this.ship.group.position, this.ship.velocity, canSpawn);
+        this.updatePartDrops(dt);
 
         // Aim-assist scan runs every frame the meteorites do — it's the
         // only thing that reads the meteorite array for screen-space
@@ -1405,6 +1506,8 @@ export class Game {
           this.enemies ?? undefined,
         );
         if (this.crosshair) {
+          // Hide crosshair inside corridors — only show in open space.
+          this.crosshair.root.style.display = outside > 0.5 ? '' : 'none';
           // When the target is an enemy, the lock is instant and the
           // progress arc would just pop to full for one frame — pass
           // dwell=1 so the ring is either full or hidden, never an

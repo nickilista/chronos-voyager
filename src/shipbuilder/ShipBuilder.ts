@@ -159,29 +159,35 @@ export class ShipBuilder {
       2000,
     );
 
-    // Deep-space backdrop — nearly black with a faint blue cast.
-    this.scene.background = new Color(0x020308);
+    // Deep-space backdrop — dark with a subtle blue-purple gradient feel.
+    this.scene.background = new Color(0x040610);
 
     // Stars far out.
     this.stars = makeStarField(2200, 600);
     this.scene.add(this.stars);
 
-    // Lighting: ambient blue fill + overhead spotlight on the ship, plus two
-    // rim accents to keep the silhouette legible against the dark bg.
-    const ambient = new AmbientLight(0x4455aa, 0.35);
+    // Lighting: stronger ambient + key light + rim accents so the ship
+    // is clearly visible without losing the dark-space atmosphere.
+    const ambient = new AmbientLight(0x6677bb, 0.6);
     this.scene.add(ambient);
-    const spot = new SpotLight(0xffffff, 2.4, 40, Math.PI * 0.22, 0.5, 1.2);
-    spot.position.set(0, 12, 4);
+    const spot = new SpotLight(0xffffff, 3.5, 50, Math.PI * 0.25, 0.4, 1.0);
+    spot.position.set(0, 14, 6);
     spot.target.position.set(0, 0, 0);
     this.scene.add(spot, spot.target);
-    const rimA = new DirectionalLight(0x5fa8ff, 0.7);
-    rimA.position.set(-5, 2, 4);
+    // Cool blue rim (left-front)
+    const rimA = new DirectionalLight(0x5fa8ff, 1.2);
+    rimA.position.set(-6, 3, 5);
     this.scene.add(rimA);
-    const rimB = new DirectionalLight(0xff9a5a, 0.45);
-    rimB.position.set(5, 1.5, -3);
+    // Warm amber rim (right-back) for depth
+    const rimB = new DirectionalLight(0xff9a5a, 0.8);
+    rimB.position.set(6, 2, -4);
     this.scene.add(rimB);
+    // Fill from below so underside isn't pitch black
+    const fillBelow = new DirectionalLight(0x4466aa, 0.4);
+    fillBelow.position.set(0, -5, 2);
+    this.scene.add(fillBelow);
     // Underglow so the platform reads as emitting light.
-    const under = new PointLight(0x5fa8ff, 1.8, 8, 2);
+    const under = new PointLight(0x5fa8ff, 2.5, 10, 1.8);
     under.position.set(0, -0.2, 0);
     this.scene.add(under);
 
